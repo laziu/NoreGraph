@@ -1,5 +1,6 @@
 import networkx as nx
 import numpy as np
+import re
 import random
 import scipy.sparse as sp
 from sklearn.model_selection import StratifiedKFold
@@ -25,7 +26,7 @@ class S2VGraph(object):
         self.max_neighbor = 0
 
 
-def load_data(dataset, degree_as_tag):
+def load_data(dataset, degree_as_tag, use_test=False):
     '''
         dataset: name of dataset
         test_proportion: ratio of test train split
@@ -37,50 +38,110 @@ def load_data(dataset, degree_as_tag):
     label_dict = {}
     feat_dict = {}
 
-    with open('../dataset/%s/%s.txt' % (dataset, dataset), 'r') as f:
-        n_g = int(f.readline().strip())
-        for i in range(n_g):
-            row = f.readline().strip().split()
-            n, l = [int(w) for w in row]
-            if not l in label_dict:
-                mapped = len(label_dict)
-                label_dict[l] = mapped
-            g = nx.Graph()
-            node_tags = []
-            node_features = []
-            n_edges = 0
-            for j in range(n):
-                g.add_node(j)
+    if dataset.upper() == 'KAGGLE':
+        g_dict = {}  # graph_index -> nx.Graph
+        l_dict = {}  # graph_index -> label
+        n2g_dict = {}  # node_index -> graph_index
+        ngi_dict = {}  # node_index -> index in graph
+
+        if use_test:
+            with open('../../data/test.txt', 'r') as f:
+                print('reading data/test.txt')
+                for line in f:
+                    row = re.findall(r'\d+', line)
+                    gi = int(row[0])
+                    g_dict[gi] = nx.Graph()
+                    l_dict[gi] = None
+        else:
+            with open('../../data/train.txt', 'r') as f:
+                print('reading data/train.txt')
+                for line in f:
+                    row = re.findall(r'\d+', line)
+                    gi, l = [int(w) for w in row]
+                    if not l in label_dict:
+                        mapped = len(label_dict)
+                        label_dict[l] = mapped
+                    g_dict[gi] = nx.Graph()
+                    l_dict[gi] = l
+
+        with open('../../data/graph_ind.txt', 'r') as f:
+            print('reading data/graph_ind.txt')
+            for line in f:
+                row = re.findall(r'\d+', line)
+                ni, gi = [int(w) for w in row]
+                if gi in g_dict:
+                    g: nx.Graph = g_dict[gi]
+                    ngi = len(g.nodes)
+                    g.add_node(ngi)
+                    n2g_dict[ni] = gi
+                    ngi_dict[ni] = ngi
+
+        with open('../../data/graph.txt', 'r') as f:
+            print('reading data/graph.txt')
+            for line in f:
+                row = re.findall(r'\d+', line)
+                ni, nj = [int(w) for w in row]
+                if ni in n2g_dict:
+                    assert nj in n2g_dict
+                    gi, gj = n2g_dict[ni], n2g_dict[nj]
+                    ngi, ngj = ngi_dict[ni], ngi_dict[nj]
+                    assert gi in g_dict
+                    assert gi == gj
+                    g: nx.Graph = g_dict[gi]
+                    g.add_edge(ngi, ngj)
+
+        for gi in g_dict:
+            g = g_dict[gi]
+            l = l_dict[gi]
+            g_list.append(S2VGraph(g, l, [0 for _ in g.nodes]))
+
+        print('processing')
+
+    else:
+        with open('../dataset/%s/%s.txt' % (dataset, dataset), 'r') as f:
+            n_g = int(f.readline().strip())
+            for i in range(n_g):
                 row = f.readline().strip().split()
-                tmp = int(row[1]) + 2
-                if tmp == len(row):
-                    # no node attributes
-                    row = [int(w) for w in row]
-                    attr = None
+                n, l = [int(w) for w in row]
+                if not l in label_dict:
+                    mapped = len(label_dict)
+                    label_dict[l] = mapped
+                g = nx.Graph()
+                node_tags = []
+                node_features = []
+                n_edges = 0
+                for j in range(n):
+                    g.add_node(j)
+                    row = f.readline().strip().split()
+                    tmp = int(row[1]) + 2
+                    if tmp == len(row):
+                        # no node attributes
+                        row = [int(w) for w in row]
+                        attr = None
+                    else:
+                        row, attr = [int(w) for w in row[:tmp]], np.array([float(w) for w in row[tmp:]])
+                    if not row[0] in feat_dict:
+                        mapped = len(feat_dict)
+                        feat_dict[row[0]] = mapped
+                    node_tags.append(feat_dict[row[0]])
+
+                    if tmp > len(row):
+                        node_features.append(attr)
+
+                    n_edges += row[1]
+                    for k in range(2, len(row)):
+                        g.add_edge(j, row[k])
+
+                if node_features != []:
+                    node_features = np.stack(node_features)
+                    node_feature_flag = True
                 else:
-                    row, attr = [int(w) for w in row[:tmp]], np.array([float(w) for w in row[tmp:]])
-                if not row[0] in feat_dict:
-                    mapped = len(feat_dict)
-                    feat_dict[row[0]] = mapped
-                node_tags.append(feat_dict[row[0]])
+                    node_features = None
+                    node_feature_flag = False
 
-                if tmp > len(row):
-                    node_features.append(attr)
+                assert len(g) == n
 
-                n_edges += row[1]
-                for k in range(2, len(row)):
-                    g.add_edge(j, row[k])
-
-            if node_features != []:
-                node_features = np.stack(node_features)
-                node_feature_flag = True
-            else:
-                node_features = None
-                node_feature_flag = False
-
-            assert len(g) == n
-
-            g_list.append(S2VGraph(g, l, node_tags))
+                g_list.append(S2VGraph(g, l, node_tags))
 
     #add labels and edge_mat       
     for g in g_list:

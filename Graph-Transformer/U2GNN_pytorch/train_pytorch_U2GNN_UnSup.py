@@ -46,7 +46,7 @@ print(args)
 print("Loading data...")
 
 use_degree_as_tag = False
-if args.dataset == 'COLLAB' or args.dataset == 'IMDBBINARY' or args.dataset == 'IMDBMULTI':
+if args.dataset in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
     use_degree_as_tag = True
 graphs, num_classes = load_data(args.dataset, use_degree_as_tag)
 graph_labels = np.array([graph.label for graph in graphs])
