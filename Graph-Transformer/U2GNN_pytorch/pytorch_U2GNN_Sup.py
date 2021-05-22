@@ -50,6 +50,7 @@ def label_smoothing(true_labels: torch.Tensor, classes: int, smoothing=0.1):
     if smoothing == 0, it's one-hot method
     if 0 < smoothing < 1, it's smooth method
     """
+    true_labels = true_labels.long()
     assert 0 <= smoothing < 1
     confidence = 1.0 - smoothing
     label_shape = torch.Size((true_labels.size(0), classes))

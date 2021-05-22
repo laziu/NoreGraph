@@ -120,7 +120,7 @@ def get_batch_data(selected_idx):
         else:
             input_neighbors.append([input_node for _ in range(args.num_neighbors + 1)])
     input_x = np.array(input_neighbors)
-    input_x = torch.from_numpy(input_x).to(device)
+    input_x = torch.from_numpy(input_x).long().to(device)
 
     input_y = get_idx_nodes(selected_idx)
 
