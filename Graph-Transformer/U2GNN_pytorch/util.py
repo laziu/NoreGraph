@@ -24,9 +24,10 @@ class S2VGraph(object):
         self.node_features = 0
         self.edge_mat = 0
         self.max_neighbor = 0
+        self.name = None
 
 
-def load_data(dataset, degree_as_tag, use_test=False):
+def load_data(dataset, degree_as_tag):
     '''
         dataset: name of dataset
         test_proportion: ratio of test train split
@@ -39,30 +40,32 @@ def load_data(dataset, degree_as_tag, use_test=False):
     feat_dict = {}
 
     if dataset.upper() == 'KAGGLE':
+        node_features = None
+        node_feature_flag = False
+
         g_dict = {}  # graph_index -> nx.Graph
         l_dict = {}  # graph_index -> label
         n2g_dict = {}  # node_index -> graph_index
         ngi_dict = {}  # node_index -> index in graph
 
-        if use_test:
-            with open('../../data/test.txt', 'r') as f:
-                print('reading data/test.txt')
-                for line in f:
-                    row = re.findall(r'\d+', line)
-                    gi = int(row[0])
-                    g_dict[gi] = nx.Graph()
-                    l_dict[gi] = None
-        else:
-            with open('../../data/train.txt', 'r') as f:
-                print('reading data/train.txt')
-                for line in f:
-                    row = re.findall(r'\d+', line)
-                    gi, l = [int(w) for w in row]
-                    if not l in label_dict:
-                        mapped = len(label_dict)
-                        label_dict[l] = mapped
-                    g_dict[gi] = nx.Graph()
-                    l_dict[gi] = l
+        with open('../../data/train.txt', 'r') as f:
+            print('reading data/train.txt')
+            for line in f:
+                row = re.findall(r'\d+', line)
+                gi, l = [int(w) for w in row]
+                if not l in label_dict:
+                    mapped = len(label_dict)
+                    label_dict[l] = mapped
+                g_dict[gi] = nx.Graph()
+                l_dict[gi] = l
+
+        with open('../../data/test.txt', 'r') as f:
+            print('reading data/test.txt')
+            for line in f:
+                row = re.findall(r'\d+', line)
+                gi = int(row[0])
+                g_dict[gi] = nx.Graph()
+                l_dict[gi] = None
 
         with open('../../data/graph_ind.txt', 'r') as f:
             print('reading data/graph_ind.txt')
@@ -93,7 +96,9 @@ def load_data(dataset, degree_as_tag, use_test=False):
         for gi in g_dict:
             g = g_dict[gi]
             l = l_dict[gi]
-            g_list.append(S2VGraph(g, l, [0 for _ in g.nodes]))
+            graph = S2VGraph(g, l, [0 for _ in g.nodes])
+            graph.name = gi
+            g_list.append(graph)
 
         print('processing')
 
@@ -155,7 +160,7 @@ def load_data(dataset, degree_as_tag, use_test=False):
             degree_list.append(len(g.neighbors[i]))
         g.max_neighbor = max(degree_list)
 
-        g.label = label_dict[g.label]
+        g.label = label_dict[g.label] if g.label in label_dict else None
 
         edges = [list(pair) for pair in g.g.edges()]
         edges.extend([[i, j] for j, i in edges])
@@ -186,7 +191,11 @@ def load_data(dataset, degree_as_tag, use_test=False):
 
     print("# data: %d" % len(g_list))
 
-    return g_list, len(label_dict)
+    label_map = {idx: label for label, idx in label_dict.items()}
+    feat_map = {idx: feat for feat, idx in feat_dict.items()}
+    graph_map = {graph.name: idx for idx, graph in enumerate(g_list) if graph.name is not None}
+
+    return g_list, len(label_dict), label_map, feat_map, graph_map
 
 def separate_data(graph_list, fold_idx, seed=0):
     assert 0 <= fold_idx and fold_idx < 10, "fold_idx must be from 0 to 9."
@@ -208,13 +217,14 @@ def separate_data_idx(graph_list, fold_idx, seed=0):
     assert 0 <= fold_idx and fold_idx < 10, "fold_idx must be from 0 to 9."
     skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=seed)
 
-    labels = [graph.label for graph in graph_list]
-    idx_list = []
-    for idx in skf.split(np.zeros(len(labels)), labels):
-        idx_list.append(idx)
+    indices, labels = np.transpose([[int(i), int(graph.label)]
+                                    for i, graph in enumerate(graph_list)
+                                    if graph.label is not None])
+
+    idx_list = list(skf.split(np.zeros(len(labels)), labels))
     train_idx, test_idx = idx_list[fold_idx]
 
-    return train_idx, test_idx
+    return indices[train_idx], indices[test_idx]
 
 """Convert sparse matrix to tuple representation."""
 def sparse_to_tuple(sparse_mx):

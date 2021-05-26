@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.data
 torch.manual_seed(123)
 
 import numpy as np
@@ -15,6 +16,8 @@ from scipy.sparse import coo_matrix
 from util import *
 from sklearn.linear_model import LogisticRegression
 import statistics
+import json
+import pickle
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
@@ -48,7 +51,15 @@ print("Loading data...")
 use_degree_as_tag = False
 if args.dataset in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
     use_degree_as_tag = True
-graphs, num_classes = load_data(args.dataset, use_degree_as_tag)
+
+try:
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
+        graphs, num_classes, label_map, graph_name_map = pickle.load(f)
+except IOError:
+    graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
+        pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
+
 graph_labels = np.array([graph.label for graph in graphs])
 feature_dim_size = graphs[0].node_features.shape[1]
 print(feature_dim_size)
@@ -171,8 +182,8 @@ def evaluate():
             train_idx, test_idx = separate_data_idx(graphs, fold_idx)
             train_graph_embeddings = graph_embeddings[train_idx]
             test_graph_embeddings = graph_embeddings[test_idx]
-            train_labels = graph_labels[train_idx]
-            test_labels = graph_labels[test_idx]
+            train_labels = graph_labels[train_idx].astype(int)
+            test_labels = graph_labels[test_idx].astype(int)
 
             cls = LogisticRegression(solver="liblinear", tol=0.001)
             cls.fit(train_graph_embeddings, train_labels)
@@ -196,6 +207,10 @@ checkpoint_prefix = os.path.join(checkpoint_dir, "model")
 if not os.path.exists(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 write_acc = open(checkpoint_prefix + '_acc.txt', 'w')
+pth_path = os.path.abspath(os.path.join(out_dir, 'model.pth'))
+
+with open(os.path.abspath(os.path.join(out_dir, 'args.json')), 'w') as f:
+    json.dump(vars(args), f, indent=4)
 
 cost_loss = []
 for epoch in range(1, args.num_epochs + 1):
@@ -210,5 +225,6 @@ for epoch in range(1, args.num_epochs + 1):
         scheduler.step()
 
     write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
+    torch.save(model.state_dict(), pth_path)
 
 write_acc.close()
