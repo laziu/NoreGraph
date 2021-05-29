@@ -215,6 +215,30 @@ def evaluate():
 
     return mean_10folds, std_10folds
 
+def inspect():
+    model.eval()
+    with torch.no_grad():
+        node_embeddings = model.ss.weight
+        graph_embeddings = torch.spmm(graph_pool, node_embeddings).data.cpu().numpy()
+
+        train_idx = [idx for idx, graph in enumerate(graphs) if graph.label is not None]
+        train_graph_embeddings = graph_embeddings[train_idx]
+        train_labels = graph_labels[train_idx].astype(int)
+
+        cls = LogisticRegression(solver="liblinear", tol=0.001)
+        cls.fit(train_graph_embeddings, train_labels)
+
+        with open(project_root/'data/test.txt', 'r') as fi, open(out_dir/'test_sample.csv', 'w') as fo:
+            fo.write('Id,Category\n')
+            for line in fi:
+                test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
+                test_internal_idx = [graph_name_map[test_idx]]
+                test_graph_embedding = graph_embeddings[test_internal_idx]
+                test_label_estimated = cls.predict(test_graph_embedding).item()
+                if test_label_estimated in label_map:
+                    test_label_estimated = label_map[test_label_estimated]
+                fo.write(f'{test_idx},{test_label_estimated}\n')
+
 """main process"""
 out_dir: Path = project_root/"runs_pytorch_U2GNN_UnSup"/args.model_name
 out_dir.mkdir(exist_ok=True, parents=True)
@@ -242,5 +266,6 @@ for epoch in range(1, args.num_epochs + 1):
 
     write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
     torch.save(model.state_dict(), pth_path)
+    inspect()
 
 write_acc.close()

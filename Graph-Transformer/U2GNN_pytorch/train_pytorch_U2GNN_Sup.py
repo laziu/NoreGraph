@@ -183,6 +183,35 @@ def evaluate():
 
     return acc_test
 
+def inspect():
+    model.eval()
+    with torch.no_grad():
+        prediction_output = []
+        csv_idx = []
+        idx = []
+        with open(project_root/'data/test.txt', 'r') as fi:
+            for line in fi:
+                test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
+                test_internal_idx = [graph_name_map[test_idx]]
+                csv_idx.append(test_idx)
+                idx.append(test_internal_idx)
+        idx = np.array(idx)
+        for i in range(0, len(idx), args.batch_size):
+            sampled_idx = idx[i:i + args.batch_size]
+            if len(sampled_idx) == 0:
+                continue
+            batch_test_graphs = [test_graphs[j] for j in sampled_idx]
+            test_input_x, test_graph_pool, test_X_concat, _ = get_batch_data(batch_test_graphs)
+            prediction_scores = model(test_input_x, test_graph_pool, test_X_concat).detach()
+            prediction_output.append(prediction_scores)
+        prediction_output = torch.cat(prediction_output, 0)
+        predictions = prediction_output.max(1, keepdim=True)[1]
+        labels_est = [label_map[l] for l in predictions if l in label_map]
+        with open(out_dir/'test_sample.csv', 'w') as fo:
+            fo.write('Id,Category\n')
+            for t_idx, label in zip(csv_idx, labels_est):
+                fo.write(f'{t_idx},{label}\n')
+
 """main process"""
 out_dir: Path = project_root/"runs_pytorch_U2GNN_Sup"/args.model_name
 out_dir.mkdir(exist_ok=True, parents=True)
@@ -205,5 +234,6 @@ for epoch in range(1, args.num_epochs + 1):
         scheduler.step()
 
     write_acc.write('epoch ' + str(epoch) + ' fold ' + str(args.fold_idx) + ' acc ' + str(acc_test*100) + '%\n')
+    inspect()
 
 write_acc.close()
