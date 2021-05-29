@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import math
-
+import sys
+sys.path.append("/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/log_uniform")
 from log_uniform import LogUniformSampler
 
 """LogUniformSampler is taken from https://github.com/rdspring1/PyTorch_GBW_LM"""
