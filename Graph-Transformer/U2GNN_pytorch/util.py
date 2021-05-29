@@ -25,6 +25,7 @@ class S2VGraph(object):
         self.edge_mat = 0
         self.max_neighbor = 0
         self.name = None
+        self.centrality = []
 
 
 def load_data(dataset, degree_as_tag):

@@ -26,9 +26,12 @@ class TransformerU2GNN(nn.Module):
         self.dropouts = nn.Dropout(dropout)
         self.ss = SampledSoftmax(self.vocab_size, self.sampled_num, self.feature_dim_size*self.num_U2GNN_layers, self.device)
 
-    def forward(self, X_concat, input_x, input_y):
+    def forward(self, X_concat, input_x, input_y, c_concat):
         output_vectors = [] # should test output_vectors = [X_concat]
-        input_Tr = F.embedding(input_x, X_concat)
+        input_Tr1 = F.embedding(input_x, X_concat)
+        input_Tr2 = F.embedding(input_x, c_concat)
+        #print('Tr1 shape : {}, Tr2 shape: {}'.format(input_Tr1.shape, input_Tr2.shape))
+        input_Tr = torch.cat((input_Tr1, input_Tr2), dim = 2)
         for layer_idx in range(self.num_U2GNN_layers):
             #
             output_Tr = self.u2gnn_layers[layer_idx](input_Tr)

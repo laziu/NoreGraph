@@ -60,8 +60,30 @@ except IOError:
     with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
         pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
 
+f_complete = open('./centrality_result/weird_cent.txt','r')
+complete = list(map(int, f_complete.readline().rstrip('\n').split(',')))
+size = [len(graph.g) for graph in graphs]
+
+completeness = [0 for _ in range(len(graphs))]
+for i, graph in enumerate(graphs):
+    if graph.name in complete:
+        completeness[i] = 1
+size = torch.Tensor(size).reshape(-1, 1) # batch_size 
+completeness = torch.Tensor(completeness).reshape(-1, 1)*100 # batch_size 
+additional_info = torch.cat((completeness, size), dim = 1) 
+
+b_c = open('./b_c.txt','r')
+c_c = open('./c_c.txt','r')
+d_c = open('./d_c.txt','r')
+
+for graph in graphs:
+    b = np.array(list(map(float, b_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)
+    c = np.array(list(map(float, c_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)
+    d = np.array(list(map(float, d_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)
+    graph.centrality = np.concatenate((b,c,d),1)
+
 graph_labels = np.array([graph.label for graph in graphs])
-feature_dim_size = graphs[0].node_features.shape[1]
+feature_dim_size = graphs[0].node_features.shape[1] + 3
 print(feature_dim_size)
 if "REDDIT" in args.dataset:
     feature_dim_size = 4
@@ -111,6 +133,9 @@ def get_idx_nodes(selected_graph_idx):
 def get_batch_data(selected_idx):
     batch_graph = [graphs[idx] for idx in selected_idx]
 
+    c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
+    c_concat = torch.tensor(c_concat, dtype = torch.float32).to(device)
+    #print('c_concat',c_concat.shape)
     X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
     if "REDDIT" in args.dataset:
         X_concat = np.tile(X_concat, feature_dim_size) #[1,1,1,1]
@@ -135,13 +160,13 @@ def get_batch_data(selected_idx):
 
     input_y = get_idx_nodes(selected_idx)
 
-    return X_concat, input_x, input_y
+    return X_concat, input_x, input_y, c_concat
 
 class Batch_Loader(object):
     def __call__(self):
         selected_idx = np.random.permutation(len(graphs))[:args.batch_size]
-        X_concat, input_x, input_y = get_batch_data(selected_idx)
-        return X_concat, input_x, input_y
+        X_concat, input_x, input_y, c_concat = get_batch_data(selected_idx)
+        return X_concat, input_x, input_y, c_concat
 
 batch_nodes = Batch_Loader()
 
@@ -160,9 +185,9 @@ def train():
     model.train() # Turn on the train mode
     total_loss = 0.
     for _ in range(num_batches_per_epoch):
-        X_concat, input_x, input_y = batch_nodes()
+        X_concat, input_x, input_y, c_concat = batch_nodes()
         optimizer.zero_grad()
-        logits = model(X_concat, input_x, input_y)
+        logits = model(X_concat, input_x, input_y, c_concat)
         loss = torch.sum(logits)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
@@ -177,11 +202,14 @@ def evaluate():
         # evaluating
         node_embeddings = model.ss.weight
         graph_embeddings = torch.spmm(graph_pool, node_embeddings).data.cpu().numpy()
+        graph_embeddings_add = np.concatenate((graph_embeddings, additional_info.numpy()), 1)
+        print(graph_embeddings_add.shape)
+
         acc_10folds = []
         for fold_idx in range(10):
             train_idx, test_idx = separate_data_idx(graphs, fold_idx)
-            train_graph_embeddings = graph_embeddings[train_idx]
-            test_graph_embeddings = graph_embeddings[test_idx]
+            train_graph_embeddings = graph_embeddings_add[train_idx]
+            test_graph_embeddings = graph_embeddings_add[test_idx]
             train_labels = graph_labels[train_idx].astype(int)
             test_labels = graph_labels[test_idx].astype(int)
 
