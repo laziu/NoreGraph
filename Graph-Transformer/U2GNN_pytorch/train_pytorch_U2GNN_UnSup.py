@@ -53,14 +53,14 @@ if args.dataset in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
     use_degree_as_tag = True
 
 try:
-    with open(f'/root/DLProject/NoreGraph/Graph-Transformer/dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
         graphs, num_classes, label_map, graph_name_map = pickle.load(f)
 except IOError:
     graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
-    with open(f'/root/DLProject/NoreGraph/Graph-Transformer/dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
         pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
 
-f_complete = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/centrality_result/weird_cent.txt','r')
+f_complete = open('./centrality_result/weird_cent.txt','r')
 complete = list(map(int, f_complete.readline().rstrip('\n').split(',')))
 size = [len(graph.g) for graph in graphs]
 
@@ -72,9 +72,9 @@ size = torch.Tensor(size).reshape(-1, 1) # batch_size
 completeness = torch.Tensor(completeness).reshape(-1, 1)*100 # batch_size 
 additional_info = torch.cat((completeness, size), dim = 1) 
 
-b_c = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/b_c.txt','r')
-c_c = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/c_c.txt','r')
-d_c = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/d_c.txt','r')
+b_c = open('./b_c.txt','r')
+c_c = open('./c_c.txt','r')
+d_c = open('./d_c.txt','r')
 
 for graph in graphs:
     b = np.array(list(map(float, b_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)

@@ -1,5 +1,5 @@
-test = open('/root/DLProject/NoreGraph/data/test.txt','r')
-weird = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/centrality_result/weird_cent.txt','r')
+test = open('../../data/test.txt','r')
+weird = open('./centrality_result/weird_cent.txt','r')
 
 
 test_list = test.readlines()
@@ -14,7 +14,7 @@ c.sort()
 print(c)
 print(len(c))
 
-f = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/centrality_result/co_weird_test.txt','w')
+f = open('./centrality_result/co_weird_test.txt','w')
 f.write(','.join(map(str,c)))
 
 test.close()

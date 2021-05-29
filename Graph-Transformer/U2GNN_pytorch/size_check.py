@@ -55,11 +55,11 @@ if args.dataset in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
     use_degree_as_tag = True
 
 try:
-    with open(f'/root/DLProject/NoreGraph/Graph-Transformer/dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
         graphs, num_classes, label_map, graph_name_map = pickle.load(f)
 except IOError:
     graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
-    with open(f'/root/DLProject/NoreGraph/Graph-Transformer/dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
         pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
 max=0
 min=500
