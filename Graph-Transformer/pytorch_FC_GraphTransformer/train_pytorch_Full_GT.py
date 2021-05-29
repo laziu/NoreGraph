@@ -39,11 +39,8 @@ print(args)
 
 # Load data
 print("Loading data...")
+graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
-use_degree_as_tag = False
-if args.dataset == 'COLLAB' or args.dataset == 'IMDBBINARY' or args.dataset == 'IMDBMULTI':
-    use_degree_as_tag = True
-graphs, num_classes = load_data(args.dataset, use_degree_as_tag)
 # graph_labels = np.array([graph.label for graph in graphs])
 # train_idx, test_idx = separate_data_idx(graphs, args.fold_idx)
 train_graphs, test_graphs = separate_data(graphs, args.fold_idx)
@@ -131,15 +128,13 @@ def evaluate():
     return acc_test
 
 """main process"""
-import os
-out_dir = os.path.abspath(os.path.join(args.run_folder, "../runs_pytorch_FC_GraphTransformer", args.model_name))
+out_dir: Path = project_root/"runs_pytorch_FC_GraphTransformer"/args.model_name
+out_dir.mkdir(exist_ok=True, parents=True)
 print("Writing to {}\n".format(out_dir))
 # Checkpoint directory
-checkpoint_dir = os.path.abspath(os.path.join(out_dir, "checkpoints"))
-checkpoint_prefix = os.path.join(checkpoint_dir, "model")
-if not os.path.exists(checkpoint_dir):
-    os.makedirs(checkpoint_dir)
-write_acc = open(checkpoint_prefix + '_acc.txt', 'w')
+checkpoint_dir = out_dir/"checkpoints"
+checkpoint_dir.mkdir(exist_ok=True, parents=True)
+write_acc = open(checkpoint_dir/'model_acc.txt', 'w')
 
 cost_loss = []
 for epoch in range(1, args.num_epochs + 1):

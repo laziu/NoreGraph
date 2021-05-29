@@ -47,20 +47,9 @@ print(args)
 
 # Load data
 print("Loading data...")
+graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
-use_degree_as_tag = False
-if args.dataset in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
-    use_degree_as_tag = True
-
-try:
-    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
-        graphs, num_classes, label_map, graph_name_map = pickle.load(f)
-except IOError:
-    graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
-    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
-        pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
-
-f_complete = open('./centrality_result/weird_cent.txt','r')
+f_complete = open(current_root/'centrality_result/weird_cent.txt','r')
 complete = list(map(int, f_complete.readline().rstrip('\n').split(',')))
 size = [len(graph.g) for graph in graphs]
 
@@ -72,9 +61,9 @@ size = torch.Tensor(size).reshape(-1, 1) # batch_size
 completeness = torch.Tensor(completeness).reshape(-1, 1)*100 # batch_size 
 additional_info = torch.cat((completeness, size), dim = 1) 
 
-b_c = open('./b_c.txt','r')
-c_c = open('./c_c.txt','r')
-d_c = open('./d_c.txt','r')
+b_c = open(current_root/'b_c.txt','r')
+c_c = open(current_root/'c_c.txt','r')
+d_c = open(current_root/'d_c.txt','r')
 
 for graph in graphs:
     b = np.array(list(map(float, b_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)
@@ -226,18 +215,16 @@ def evaluate():
     return mean_10folds, std_10folds
 
 """main process"""
-import os
-out_dir = os.path.abspath(os.path.join(args.run_folder, "../runs_pytorch_U2GNN_UnSup", args.model_name))
+out_dir: Path = project_root/"runs_pytorch_U2GNN_UnSup"/args.model_name
+out_dir.mkdir(exist_ok=True, parents=True)
 print("Writing to {}\n".format(out_dir))
 # Checkpoint directory
-checkpoint_dir = os.path.abspath(os.path.join(out_dir, "checkpoints"))
-checkpoint_prefix = os.path.join(checkpoint_dir, "model")
-if not os.path.exists(checkpoint_dir):
-    os.makedirs(checkpoint_dir)
-write_acc = open(checkpoint_prefix + '_acc.txt', 'w')
-pth_path = os.path.abspath(os.path.join(out_dir, 'model.pth'))
+checkpoint_dir = out_dir/"checkpoints"
+checkpoint_dir.mkdir(exist_ok=True, parents=True)
+write_acc = open(checkpoint_dir/'model_acc.txt', 'w')
+pth_path = out_dir/'model.pth'
 
-with open(os.path.abspath(os.path.join(out_dir, 'args.json')), 'w') as f:
+with open(out_dir/'args.json', 'w') as f:
     json.dump(vars(args), f, indent=4)
 
 cost_loss = []

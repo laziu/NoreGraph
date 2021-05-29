@@ -4,6 +4,11 @@ import random
 import scipy.sparse as sp
 import re
 from sklearn.model_selection import StratifiedKFold
+import pickle
+from pathlib import Path
+
+project_root = Path(__file__).parents[2].absolute()
+current_root = Path(__file__).parent.absolute()
 
 """Adapted from https://github.com/weihua916/powerful-gnns/blob/master/util.py"""
 
@@ -26,12 +31,15 @@ class S2VGraph(object):
         self.name = 0
         self.max_neighbor = 0
 
-def load_data(dataset, degree_as_tag):
+def load_data(dataset):
     '''
         dataset: name of dataset
         test_proportion: ratio of test train split
         seed: random seed for random splitting of dataset
     '''
+    degree_as_tag = False
+    if str(dataset).upper() in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
+        degree_as_tag = True
 
     print('loading data')
     g_list = []
@@ -46,7 +54,7 @@ def load_data(dataset, degree_as_tag):
         n2g_dict = {}  # node_index -> graph_index
         ngi_dict = {}  # node_index -> index in graph
 
-        with open('../../data/test.txt', 'r') as f:
+        with open(project_root/'data/test.txt', 'r') as f:
             print('reading data/test.txt')
             for line in f:
                 row = re.findall(r'\d+', line)
@@ -54,7 +62,7 @@ def load_data(dataset, degree_as_tag):
                 g_dict[gi] = nx.Graph()
                 l_dict[gi] = None
 
-        with open('../../data/train.txt', 'r') as f:
+        with open(project_root/'data/train.txt', 'r') as f:
             print('reading data/train.txt')
             for line in f:
                 row = re.findall(r'\d+', line)
@@ -65,7 +73,7 @@ def load_data(dataset, degree_as_tag):
                 g_dict[gi] = nx.Graph()
                 l_dict[gi] = l
 
-        with open('../../data/graph_ind.txt', 'r') as f:
+        with open(project_root/'data/graph_ind.txt', 'r') as f:
             print('reading data/graph_ind.txt')
             for line in f:
                 row = re.findall(r'\d+', line)
@@ -77,7 +85,7 @@ def load_data(dataset, degree_as_tag):
                     n2g_dict[ni] = gi
                     ngi_dict[ni] = ngi
 
-        with open('../../data/graph.txt', 'r') as f:
+        with open(project_root/'data/graph.txt', 'r') as f:
             print('reading data/graph.txt')
             for line in f:
                 row = re.findall(r'\d+', line)
@@ -102,7 +110,7 @@ def load_data(dataset, degree_as_tag):
 
     else:
         
-        with open('../dataset/%s/%s.txt' % (dataset, dataset), 'r') as f:
+        with open(project_root/'Graph-Transformer/dataset/%s/%s.txt' % (dataset, dataset), 'r') as f:
             n_g = int(f.readline().strip())
             for i in range(n_g):
                 row = f.readline().strip().split()
@@ -195,6 +203,16 @@ def load_data(dataset, degree_as_tag):
     graph_map = {graph.name: idx for idx, graph in enumerate(g_list) if graph.name is not None}
 
     return g_list, len(label_dict), label_map, feat_map, graph_map
+
+def load_cached_data(dataset):
+    try:
+        with open(project_root/f"dataset_{dataset}.pkl", "rb") as f:
+            chunk = pickle.load(f)
+    except IOError:
+        chunk = load_data(dataset)
+        with open(project_root/f"dataset_{dataset}.pkl", "wb") as f:
+            pickle.dump(chunk, f)
+    return chunk
 
 def separate_data(graph_list, fold_idx, seed=0):
     assert 0 <= fold_idx and fold_idx < 10, "fold_idx must be from 0 to 9."

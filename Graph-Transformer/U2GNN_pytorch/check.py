@@ -1,5 +1,7 @@
-test = open('../../data/test.txt','r')
-weird = open('./centrality_result/weird_cent.txt','r')
+from util import *
+
+test = open(project_root/'data/test.txt','r')
+weird = open(current_root/'centrality_result/weird_cent.txt','r')
 
 
 test_list = test.readlines()
@@ -14,7 +16,7 @@ c.sort()
 print(c)
 print(len(c))
 
-f = open('./centrality_result/co_weird_test.txt','w')
+f = open(current_root/'centrality_result/co_weird_test.txt','w')
 f.write(','.join(map(str,c)))
 
 test.close()

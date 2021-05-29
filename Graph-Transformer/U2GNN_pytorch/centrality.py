@@ -48,26 +48,15 @@ print(args)
 
 # Load data
 print("Loading data...")
-
-use_degree_as_tag = False
-if args.dataset in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
-    use_degree_as_tag = True
-
-try:
-    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
-        graphs, num_classes, label_map, graph_name_map = pickle.load(f)
-except IOError:
-    graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
-    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
-        pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
+graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
 
 # graphs = g_list
 temp = []
-b_cent = open('./b_c.txt','r')
-c_cent = open('./c_c.txt','r')
-d_cent = open('./d_c.txt','r')
-weird_cent = open('./centrality_result/weird_cent.txt','w')
+b_cent = open(current_root/'b_c.txt','r')
+c_cent = open(current_root/'c_c.txt','r')
+d_cent = open(current_root/'d_c.txt','r')
+weird_cent = open(current_root/'centrality_result/weird_cent.txt','w')
 d_list = []
 c_list = []
 b_list = []

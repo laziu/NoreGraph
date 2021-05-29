@@ -40,18 +40,7 @@ print(args)
 
 # Load data
 print("Loading data...")
-
-use_degree_as_tag = False
-if args.dataset == 'COLLAB' or args.dataset == 'IMDBBINARY' or args.dataset == 'IMDBMULTI' or args.dataset == "KAGGLE":
-    use_degree_as_tag = True
-
-try:
-    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
-        graphs, num_classes, label_map, graph_name_map = pickle.load(f)
-except IOError:
-    graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
-    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
-        pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
+graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
 feature_dim_size = graphs[0].node_features.shape[1]
 graph_labels = np.array([graph.label for graph in graphs])
@@ -150,14 +139,13 @@ with tf.Graph().as_default():
         grads_and_vars = optimizer.compute_gradients(unsup_gcn.total_loss)
         train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
 
-        out_dir = os.path.abspath(os.path.join(args.run_folder, "../runs_GCN_UnSup", args.model_name))
+        out_dir: Path = project_root/"runs_GCN_UnSup"/args.model_name
+        out_dir.mkdir(exist_ok=True, parents=True)
         print("Writing to {}\n".format(out_dir))
 
         # Checkpoint directory. Tensorflow assumes this directory already exists so we need to create it
-        checkpoint_dir = os.path.abspath(os.path.join(out_dir, "checkpoints"))
-        checkpoint_prefix = os.path.join(checkpoint_dir, "model")
-        if not os.path.exists(checkpoint_dir):
-            os.makedirs(checkpoint_dir)
+        checkpoint_dir = out_dir/"checkpoints"
+        checkpoint_dir.mkdir(exist_ok=True, parents=True)
 
         # Initialize all variables
         sess.run(tf.compat.v1.global_variables_initializer())
@@ -174,7 +162,7 @@ with tf.Graph().as_default():
             _, step, loss = sess.run([train_op, global_step, unsup_gcn.total_loss], feed_dict)
             return loss
 
-        write_acc = open(checkpoint_prefix + '_acc.txt', 'w')
+        write_acc = open(checkpoint_dir/'model_acc.txt', 'w')
         max_acc = 0.0
         idx_epoch = 0
         num_batches_per_epoch = int((len(graphs) - 1) / args.batch_size) + 1
@@ -215,8 +203,8 @@ with tf.Graph().as_default():
 
         cls = LogisticRegression(tol=0.001, max_iter=1000)
         cls.fit(train_graph_embeddings, train_labels)
-        out_path = os.path.abspath(os.path.join(out_dir, 'test_sample.csv'))
-        with open('../../data/test.txt', 'r') as fi, open(out_path, 'w') as fo:
+        out_path = out_dir/'test_sample.csv'
+        with open(project_root/'data/test.txt', 'r') as fi, open(out_path, 'w') as fo:
             fo.write('Id,Category\n')
             for line in fi:
                 test_idx = [int(w) for w in re.findall(r'\d+', line)][0]

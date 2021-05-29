@@ -29,10 +29,10 @@ parser.add_argument("--run_folder", default="../", help="")
 parser.add_argument("--model_name", default='PTC', help="")
 args = parser.parse_args()
 
-out_dir = os.path.abspath(os.path.join(args.run_folder, "../runs_pytorch_U2GNN_UnSup", args.model_name))
-pth_path = os.path.abspath(os.path.join(out_dir, 'model.pth'))
+out_dir = project_root/"runs_pytorch_U2GNN_UnSup"/args.model_name
+pth_path = out_dir/'model.pth'
 
-with open(os.path.abspath(os.path.join(out_dir, 'args.json')), 'r') as f:
+with open(out_dir/'args.json', 'r') as f:
     dump = json.load(f)
     _args = vars(args)
     _args.update(dump)
@@ -43,14 +43,7 @@ print(args)
 
 # Load data
 print("Loading data...")
-
-try:
-    with open(f'../../dataset_KAGGLE_True.pkl', 'rb') as f:
-        graphs, num_classes, label_map, graph_name_map = pickle.load(f)
-except IOError:
-    graphs, num_classes, label_map, _, graph_name_map = load_data('KAGGLE', True)
-    with open(f'../../dataset_KAGGLE_True.pkl', 'wb') as f:
-        pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
+graphs, num_classes, label_map, _, graph_name_map = load_cached_data('KAGGLE')
 
 graph_labels = np.array([graph.label for graph in graphs])
 feature_dim_size = graphs[0].node_features.shape[1]
@@ -169,8 +162,8 @@ def inspect():
         cls = LogisticRegression(solver="lbfgs", tol=0.001, max_iter=1000)
         cls.fit(train_graph_embeddings, train_labels)
 
-        out_path = os.path.abspath(os.path.join(out_dir, 'test_sample.csv'))
-        with open('../../data/test.txt', 'r') as fi, open(out_path, 'w') as fo:
+        out_path = out_dir/'test_sample.csv'
+        with open(project_root/'data/test.txt', 'r') as fi, open(out_path, 'w') as fo:
             fo.write('Id,Category\n')
             for line in fi:
                 test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
@@ -184,8 +177,6 @@ def inspect():
 
 """main process"""
 print("Reading {}\n".format(out_dir))
-pth_path = os.path.abspath(os.path.join(out_dir, 'model.pth'))
-
 model.load_state_dict(torch.load(pth_path))
 print('Generating outputs')
 inspect()
