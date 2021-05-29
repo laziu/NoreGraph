@@ -48,5 +48,5 @@ class GCN_graph_cls(object):
             tf.nn.sampled_softmax_loss(weights=self.embedding_matrix, biases=self.softmax_biases,
                                        inputs=self.output_vectors, labels=self.input_y, num_sampled=num_sampled, num_classes=vocab_size))
 
-        self.saver = tf.compat.v1.train.Saver(tf.global_variables(), max_to_keep=500)
-        tf.logging.info('Seting up the main structure')
+        self.saver = tf.compat.v1.train.Saver(tf.compat.v1.global_variables(), max_to_keep=500)
+        tf.compat.v1.logging.info('Seting up the main structure')

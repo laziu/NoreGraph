@@ -9,7 +9,7 @@ import os
 import time
 import datetime
 from model_unsup_gcn import GCN_graph_cls
-import pickle as cPickle
+import pickle
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from scipy.sparse import coo_matrix
 from util import *
@@ -42,9 +42,17 @@ print(args)
 print("Loading data...")
 
 use_degree_as_tag = False
-if args.dataset == 'COLLAB' or args.dataset == 'IMDBBINARY' or args.dataset == 'IMDBMULTI':
+if args.dataset == 'COLLAB' or args.dataset == 'IMDBBINARY' or args.dataset == 'IMDBMULTI' or args.dataset == "KAGGLE":
     use_degree_as_tag = True
-graphs, num_classes = load_data(args.dataset, use_degree_as_tag)
+
+try:
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
+        graphs, num_classes, label_map, graph_name_map = pickle.load(f)
+except IOError:
+    graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
+    with open(f'../../dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
+        pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
+
 feature_dim_size = graphs[0].node_features.shape[1]
 graph_labels = np.array([graph.label for graph in graphs])
 if "REDDIT" in args.dataset:
@@ -171,6 +179,7 @@ with tf.Graph().as_default():
         idx_epoch = 0
         num_batches_per_epoch = int((len(graphs) - 1) / args.batch_size) + 1
         for epoch in range(1, args.num_epochs+1):
+
             loss = 0
             for _ in range(num_batches_per_epoch):
                 Adj_block, X_concat, num_features_nonzero, idx_nodes = batch_nodes()
@@ -187,8 +196,8 @@ with tf.Graph().as_default():
                 train_idx, test_idx = separate_data_idx(graphs, fold_idx)
                 train_graph_embeddings = graph_embeddings[train_idx]
                 test_graph_embeddings = graph_embeddings[test_idx]
-                train_labels = graph_labels[train_idx]
-                test_labels = graph_labels[test_idx]
+                train_labels = graph_labels[train_idx].astype(int)
+                test_labels = graph_labels[test_idx].astype(int)
 
                 cls = LogisticRegression(tol=0.001)
                 cls.fit(train_graph_embeddings, train_labels)
@@ -203,3 +212,17 @@ with tf.Graph().as_default():
             write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
 
         write_acc.close()
+
+        cls = LogisticRegression(tol=0.001, max_iter=1000)
+        cls.fit(train_graph_embeddings, train_labels)
+        out_path = os.path.abspath(os.path.join(out_dir, 'test_sample.csv'))
+        with open('../../data/test.txt', 'r') as fi, open(out_path, 'w') as fo:
+            fo.write('Id,Category\n')
+            for line in fi:
+                test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
+                test_internal_idx = [graph_name_map[test_idx]]
+                test_graph_embedding = graph_embeddings[test_internal_idx]
+                test_label_estimated = cls.predict(test_graph_embedding).item()
+                if test_label_estimated in label_map:
+                    test_label_estimated = label_map[test_label_estimated]
+                fo.write(f'{test_idx},{test_label_estimated}\n')
