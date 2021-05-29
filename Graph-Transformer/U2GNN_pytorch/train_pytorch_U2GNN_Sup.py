@@ -115,17 +115,18 @@ def get_batch_data(batch_graph):
 
     return input_x, graph_pool, X_concat, graph_labels
 
-class Batch_Loader(object):
-    def __call__(self):
-        selected_idx = np.random.permutation(len(train_graphs))[:args.batch_size]
+def batch_loader():
+    permuted_idx = np.random.permutation(len(graphs))
+    length = int(np.ceil(len(graphs) / args.batch_size))
+
+    for i in range(length):
+        start = i * args.batch_size
+        end = min((i+1) * args.batch_size, len(graphs))
+        selected_idx = permuted_idx[start:end]
+
         batch_graph = [train_graphs[idx] for idx in selected_idx]
         input_x, graph_pool, X_concat, graph_labels = get_batch_data(batch_graph)
-        return input_x, graph_pool, X_concat, graph_labels
-
-batch_nodes = Batch_Loader()
-# input_x, graph_pool, X_concat, graph_labels = batch_nodes()
-# print(input_x)
-# print(X_concat)
+        yield input_x, graph_pool, X_concat, graph_labels
 
 print("Loading data... finished!")
 
@@ -146,8 +147,7 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_batches_per
 def train():
     model.train() # Turn on the train mode
     total_loss = 0.
-    for _ in range(num_batches_per_epoch):
-        input_x, graph_pool, X_concat, graph_labels = batch_nodes()
+    for input_x, graph_pool, X_concat, graph_labels in batch_loader():
         graph_labels = label_smoothing(graph_labels, num_classes)
         optimizer.zero_grad()
         prediction_scores = model(input_x, graph_pool, X_concat)

@@ -151,13 +151,15 @@ def get_batch_data(selected_idx):
 
     return X_concat, input_x, input_y, c_concat
 
-class Batch_Loader(object):
-    def __call__(self):
-        selected_idx = np.random.permutation(len(graphs))[:args.batch_size]
-        X_concat, input_x, input_y, c_concat = get_batch_data(selected_idx)
-        return X_concat, input_x, input_y, c_concat
+def batch_loader():
+    permuted_idx = np.random.permutation(len(graphs))
+    length = int(np.ceil(len(graphs) / args.batch_size))
 
-batch_nodes = Batch_Loader()
+    for i in range(length):
+        start = i * args.batch_size
+        end = min((i+1) * args.batch_size, len(graphs))
+        selected_idx = permuted_idx[start:end]
+        yield get_batch_data(selected_idx)
 
 print("Loading data... finished!")
 
@@ -173,8 +175,7 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_batches_per
 def train():
     model.train() # Turn on the train mode
     total_loss = 0.
-    for _ in range(num_batches_per_epoch):
-        X_concat, input_x, input_y, c_concat = batch_nodes()
+    for X_concat, input_x, input_y, c_concat in batch_loader():
         optimizer.zero_grad()
         logits = model(X_concat, input_x, input_y, c_concat)
         loss = torch.sum(logits)

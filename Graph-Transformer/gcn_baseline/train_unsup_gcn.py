@@ -109,14 +109,19 @@ def get_batch_data(batch_graph):
     num_features_nonzero = X_concat[1].shape
     return Adj_block, X_concat, num_features_nonzero
 
-class Batch_Loader(object):
-    def __call__(self):
-        selected_idx = np.random.permutation(len(graphs))[:args.batch_size]
+def batch_loader():
+    permuted_idx = np.random.permutation(len(graphs))
+    length = int(np.ceil(len(graphs) / args.batch_size))
+
+    for i in range(length):
+        start = i * args.batch_size
+        end = min((i+1) * args.batch_size, len(graphs))
+        selected_idx = permuted_idx[start:end]
+
         batch_graph = [graphs[idx] for idx in selected_idx]
         Adj_block, X_concat, num_features_nonzero = get_batch_data(batch_graph)
         idx_nodes = get_idx_nodes(selected_idx)
-        return Adj_block, X_concat, num_features_nonzero, idx_nodes
-batch_nodes = Batch_Loader()
+        yield Adj_block, X_concat, num_features_nonzero, idx_nodes
 
 print("Loading data... finished!")
 # Training
@@ -169,8 +174,7 @@ with tf.Graph().as_default():
         for epoch in range(1, args.num_epochs+1):
 
             loss = 0
-            for _ in range(num_batches_per_epoch):
-                Adj_block, X_concat, num_features_nonzero, idx_nodes = batch_nodes()
+            for Adj_block, X_concat, num_features_nonzero, idx_nodes in batch_loader():
                 loss += train_step(Adj_block, X_concat, num_features_nonzero, idx_nodes)
                 # current_step = tf.compat.v1.train.global_step(sess, global_step)
             print(loss)
