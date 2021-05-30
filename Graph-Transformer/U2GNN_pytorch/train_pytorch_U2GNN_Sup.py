@@ -3,10 +3,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-torch.manual_seed(123)
 
 import numpy as np
-np.random.seed(123)
 import time
 
 from pytorch_U2GNN_Sup import *
@@ -15,8 +13,6 @@ from scipy.sparse import coo_matrix
 from util import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
 
 # Parameters
 # ==================================================
@@ -46,7 +42,7 @@ graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.datase
 
 # graph_labels = np.array([graph.label for graph in graphs])
 # train_idx, test_idx = separate_data_idx(graphs, args.fold_idx)
-train_graphs, test_graphs = separate_data(graphs, args.fold_idx)
+train_graphs, test_graphs = separate_data(graphs, args.fold_idx, None)
 feature_dim_size = graphs[0].node_features.shape[1]
 print(feature_dim_size)
 if "REDDIT" in args.dataset:
@@ -200,7 +196,7 @@ def inspect():
             sampled_idx = idx[i:i + args.batch_size]
             if len(sampled_idx) == 0:
                 continue
-            batch_test_graphs = [test_graphs[j] for j in sampled_idx]
+            batch_test_graphs = [graphs[j] for j in sampled_idx]
             test_input_x, test_graph_pool, test_X_concat, _ = get_batch_data(batch_test_graphs)
             prediction_scores = model(test_input_x, test_graph_pool, test_X_concat).detach()
             prediction_output.append(prediction_scores)
@@ -223,6 +219,8 @@ write_acc = open(checkpoint_dir/'model_acc.txt', 'w')
 
 cost_loss = []
 for epoch in range(1, args.num_epochs + 1):
+    train_graphs, test_graphs = separate_data(graphs, args.fold_idx, None)
+
     epoch_start_time = time.time()
     train_loss = train()
     cost_loss.append(train_loss)

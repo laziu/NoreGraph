@@ -35,7 +35,6 @@ def load_data(dataset):
     '''
         dataset: name of dataset
         test_proportion: ratio of test train split
-        seed: random seed for random splitting of dataset
     '''
     degree_as_tag = False
     if str(dataset).upper() in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
@@ -218,14 +217,15 @@ def separate_data(graph_list, fold_idx, seed=0):
     assert 0 <= fold_idx and fold_idx < 10, "fold_idx must be from 0 to 9."
     skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=seed)
 
-    labels = [graph.label for graph in graph_list]
+    indices, labels = np.transpose([[int(i), int(graph.label)]
+                                    for i, graph in enumerate(graph_list)
+                                    if graph.label is not None])
     idx_list = []
-    for idx in skf.split(np.zeros(len(labels)), labels):
-        idx_list.append(idx)
+    idx_list = list(skf.split(np.zeros(len(labels)), labels))
     train_idx, test_idx = idx_list[fold_idx]
 
-    train_graph_list = [graph_list[i] for i in train_idx]
-    test_graph_list = [graph_list[i] for i in test_idx]
+    train_graph_list = [graph_list[i] for i in indices[train_idx]]
+    test_graph_list = [graph_list[i] for i in indices[test_idx]]
 
     return train_graph_list, test_graph_list
 

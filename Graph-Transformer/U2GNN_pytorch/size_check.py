@@ -4,10 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
-torch.manual_seed(123)
 
 import numpy as np
-np.random.seed(123)
 import time
 
 from pytorch_U2GNN_UnSup import *
@@ -22,8 +20,6 @@ import pickle
 import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
 
 # Parameters
 # ==================================================

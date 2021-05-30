@@ -4,10 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
-torch.manual_seed(123)
 
 import numpy as np
-np.random.seed(123)
 import time
 
 from pytorch_U2GNN_UnSup import *
@@ -20,8 +18,6 @@ import json
 import pickle
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
 
 # Parameters
 # ==================================================
@@ -196,8 +192,9 @@ def evaluate():
         print(graph_embeddings_add.shape)
 
         acc_10folds = []
+        rand_seed = np.random.randint(0xFFFF)
         for fold_idx in range(10):
-            train_idx, test_idx = separate_data_idx(graphs, fold_idx)
+            train_idx, test_idx = separate_data_idx(graphs, fold_idx, rand_seed)
             train_graph_embeddings = graph_embeddings_add[train_idx]
             test_graph_embeddings = graph_embeddings_add[test_idx]
             train_labels = graph_labels[train_idx].astype(int)

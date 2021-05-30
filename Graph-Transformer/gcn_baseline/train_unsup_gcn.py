@@ -2,8 +2,6 @@
 
 import tensorflow as tf
 import numpy as np
-np.random.seed(123)
-tf.compat.v1.set_random_seed(123)
 
 import os
 import time
@@ -184,8 +182,9 @@ with tf.Graph().as_default():
             graph_embeddings = graph_pool.dot(node_embeddings)
             #
             acc_10folds = []
+            rand_seed = np.random.randint(0xFFFF)
             for fold_idx in range(10):
-                train_idx, test_idx = separate_data_idx(graphs, fold_idx)
+                train_idx, test_idx = separate_data_idx(graphs, fold_idx, rand_seed)
                 train_graph_embeddings = graph_embeddings[train_idx]
                 test_graph_embeddings = graph_embeddings[test_idx]
                 train_labels = graph_labels[train_idx].astype(int)
