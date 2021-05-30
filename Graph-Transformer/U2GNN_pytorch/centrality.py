@@ -4,10 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
-torch.manual_seed(123)
 
 import numpy as np
-np.random.seed(123)
 import time
 
 from pytorch_U2GNN_UnSup import *
@@ -21,8 +19,6 @@ import json
 import pickle
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
 
 # Parameters
 # ==================================================
@@ -48,49 +44,38 @@ print(args)
 
 # Load data
 print("Loading data...")
-
-use_degree_as_tag = False
-if args.dataset in ['COLLAB', 'IMDBBINARY', 'IMDBMULTI', 'KAGGLE']:
-    use_degree_as_tag = True
-
-try:
-    with open(f'/root/DLProject/NoreGraph/Graph-Transformer/dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'rb') as f:
-        graphs, num_classes, label_map, graph_name_map = pickle.load(f)
-except IOError:
-    graphs, num_classes, label_map, _, graph_name_map = load_data(args.dataset, use_degree_as_tag)
-    with open(f'/root/DLProject/NoreGraph/Graph-Transformer/dataset_{args.dataset}_{use_degree_as_tag}.pkl', 'wb') as f:
-        pickle.dump((graphs, num_classes, label_map, graph_name_map), f)
+graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
 
 # graphs = g_list
 temp = []
-b_cent = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/b_c.txt','r')
-c_cent = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/c_c.txt','r')
-d_cent = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/d_c.txt','r')
-weird_cent = open('/root/DLProject/NoreGraph/Graph-Transformer/U2GNN_pytorch/centrality_result/weird_cent.txt','w')
+b_cent = open(current_root/'b_c.txt','w')
+c_cent = open(current_root/'c_c.txt','w')
+d_cent = open(current_root/'d_c.txt','w')
+weird_cent = open(current_root/'centrality_result/weird_cent.txt','w')
 d_list = []
 c_list = []
 b_list = []
 num_graph = 0
 for i, g in enumerate(graphs):
-    temp = b_cent.readline().split(',')
-    #temp = list(nx.betweenness_centrality(g.g).values())
-    #b_cent.write(','.join(map(str,temp)))
-    #b_cent.write('\n')
+    #temp = b_cent.readline().split(',')
+    temp = list(nx.betweenness_centrality(g.g).values())
+    b_cent.write(','.join(map(str,temp)))
+    b_cent.write('\n')
     if max(map(float,temp)) < 0.00001 :
         b_list.append(g.name)
 
-    temp = c_cent.readline().split(',')
-    #temp = list(nx.closeness_centrality(g.g).values())
-    #c_cent.write(','.join(map(str,temp)))
-    #c_cent.write('\n')
+    #temp = c_cent.readline().split(',')
+    temp = list(nx.closeness_centrality(g.g).values())
+    c_cent.write(','.join(map(str,temp)))
+    c_cent.write('\n')
     if min(map(float,temp)) > 0.99 :
         c_list.append(g.name)
     
-    temp = d_cent.readline().split(',')
-    #temp = list(nx.degree_centrality(g.g).values())
-    #d_cent.write(','.join(map(str,temp)))
-    #d_cent.write('\n')  
+    #temp = d_cent.readline().split(',')
+    temp = list(nx.degree_centrality(g.g).values())
+    d_cent.write(','.join(map(str,temp)))
+    d_cent.write('\n')  
     if min(map(float,temp)) > 0.99 :
         d_list.append(g.name)
 
