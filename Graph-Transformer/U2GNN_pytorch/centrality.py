@@ -49,33 +49,33 @@ graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.datase
 
 # graphs = g_list
 temp = []
-b_cent = open(current_root/'b_c.txt','r')
-c_cent = open(current_root/'c_c.txt','r')
-d_cent = open(current_root/'d_c.txt','r')
+b_cent = open(current_root/'b_c.txt','w')
+c_cent = open(current_root/'c_c.txt','w')
+d_cent = open(current_root/'d_c.txt','w')
 weird_cent = open(current_root/'centrality_result/weird_cent.txt','w')
 d_list = []
 c_list = []
 b_list = []
 num_graph = 0
 for i, g in enumerate(graphs):
-    temp = b_cent.readline().split(',')
-    #temp = list(nx.betweenness_centrality(g.g).values())
-    #b_cent.write(','.join(map(str,temp)))
-    #b_cent.write('\n')
+    #temp = b_cent.readline().split(',')
+    temp = list(nx.betweenness_centrality(g.g).values())
+    b_cent.write(','.join(map(str,temp)))
+    b_cent.write('\n')
     if max(map(float,temp)) < 0.00001 :
         b_list.append(g.name)
 
-    temp = c_cent.readline().split(',')
-    #temp = list(nx.closeness_centrality(g.g).values())
-    #c_cent.write(','.join(map(str,temp)))
-    #c_cent.write('\n')
+    #temp = c_cent.readline().split(',')
+    temp = list(nx.closeness_centrality(g.g).values())
+    c_cent.write(','.join(map(str,temp)))
+    c_cent.write('\n')
     if min(map(float,temp)) > 0.99 :
         c_list.append(g.name)
     
-    temp = d_cent.readline().split(',')
-    #temp = list(nx.degree_centrality(g.g).values())
-    #d_cent.write(','.join(map(str,temp)))
-    #d_cent.write('\n')  
+    #temp = d_cent.readline().split(',')
+    temp = list(nx.degree_centrality(g.g).values())
+    d_cent.write(','.join(map(str,temp)))
+    d_cent.write('\n')  
     if min(map(float,temp)) > 0.99 :
         d_list.append(g.name)
 
