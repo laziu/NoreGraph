@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
+from torch.utils.data import Dataset, DataLoader
 
 import numpy as np
 import time
@@ -16,6 +17,7 @@ from sklearn.linear_model import LogisticRegression
 import statistics
 import json
 import pickle
+from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -37,38 +39,24 @@ parser.add_argument("--num_timesteps", default=1, type=int, help="Timestep T ~ N
 parser.add_argument("--ff_hidden_size", default=1024, type=int, help="The hidden size for the feedforward layer")
 parser.add_argument("--num_neighbors", default=4, type=int, help="")
 parser.add_argument('--fold_idx', type=int, default=1, help='The fold index. 0-9.')
+parser.add_argument('--only_train', type=bool, default=False)
+parser.add_argument('--only_test', type=bool, default=False)
 args = parser.parse_args()
 
 print(args)
 
 # Load data
 print("Loading data...")
-graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
+graphs, _, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
-f_complete = open(current_root/'centrality_result/weird_cent.txt','r')
-complete = list(map(int, f_complete.readline().rstrip('\n').split(',')))
+weird = [graph.centrality_weirdness for graph in graphs]
 size = [len(graph.g) for graph in graphs]
-
-completeness = [0 for _ in range(len(graphs))]
-for i, graph in enumerate(graphs):
-    if graph.name in complete:
-        completeness[i] = 1
-size = torch.Tensor(size).reshape(-1, 1) # batch_size 
-completeness = torch.Tensor(completeness).reshape(-1, 1)*100 # batch_size 
-additional_info = torch.cat((completeness, size), dim = 1) 
-
-b_c = open(current_root/'b_c.txt','r')
-c_c = open(current_root/'c_c.txt','r')
-d_c = open(current_root/'d_c.txt','r')
-
-for graph in graphs:
-    b = np.array(list(map(float, b_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)
-    c = np.array(list(map(float, c_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)
-    d = np.array(list(map(float, d_c.readline().rstrip('\n').split(',')))).transpose().reshape(-1,1)
-    graph.centrality = np.concatenate((b,c,d),1)
+weird = torch.Tensor(weird).reshape(-1, 1) # batch size
+size  = torch.Tensor(size ).reshape(-1, 1) # batch size
+additional_info = torch.cat((weird, size), dim = 1)
 
 graph_labels = np.array([graph.label for graph in graphs])
-feature_dim_size = graphs[0].node_features.shape[1] + 3
+feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
 print(feature_dim_size)
 if "REDDIT" in args.dataset:
     feature_dim_size = 4
@@ -104,7 +92,7 @@ def get_graphpool(batch_graph):
     idx = torch.LongTensor(idx).transpose(0, 1)
     graph_pool = torch.sparse.FloatTensor(idx, elem, torch.Size([len(batch_graph), start_idx[-1]]))
 
-    return graph_pool.to(device)
+    return graph_pool
 #
 graph_pool = get_graphpool(graphs)
 graph_indices = graph_pool._indices()[0]
@@ -113,19 +101,18 @@ vocab_size=graph_pool.size()[1]
 def get_idx_nodes(selected_graph_idx):
     idx_nodes = [torch.where(graph_indices==i)[0] for i in selected_graph_idx]
     idx_nodes = torch.cat(idx_nodes)
-    return idx_nodes.to(device)
+    return idx_nodes
 
 def get_batch_data(selected_idx):
     batch_graph = [graphs[idx] for idx in selected_idx]
-
     c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
-    c_concat = torch.tensor(c_concat, dtype = torch.float32).to(device)
+    c_concat = torch.from_numpy(c_concat).to(torch.float32)
     #print('c_concat',c_concat.shape)
     X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
     if "REDDIT" in args.dataset:
         X_concat = np.tile(X_concat, feature_dim_size) #[1,1,1,1]
         X_concat = X_concat * 0.01
-    X_concat = torch.from_numpy(X_concat).to(device)
+    X_concat = torch.from_numpy(X_concat)
 
     Adj_block_idx_row, Adj_block_idx_cl = get_Adj_matrix(batch_graph)
     dict_Adj_block = {}
@@ -141,21 +128,17 @@ def get_batch_data(selected_idx):
         else:
             input_neighbors.append([input_node for _ in range(args.num_neighbors + 1)])
     input_x = np.array(input_neighbors)
-    input_x = torch.from_numpy(input_x).long().to(device)
+    input_x = torch.from_numpy(input_x).long()
 
     input_y = get_idx_nodes(selected_idx)
 
     return X_concat, input_x, input_y, c_concat
 
-def batch_loader():
-    permuted_idx = np.random.permutation(len(graphs))
-    length = int(np.ceil(len(graphs) / args.batch_size))
+class IndexDataset(Dataset):
+    def __len__(self): return len(graphs)
+    def __getitem__(self, i): return i
 
-    for i in range(length):
-        start = i * args.batch_size
-        end = min((i+1) * args.batch_size, len(graphs))
-        selected_idx = permuted_idx[start:end]
-        yield get_batch_data(selected_idx)
+dataloader = DataLoader(IndexDataset(), batch_size=args.batch_size, shuffle=True, collate_fn=get_batch_data, pin_memory=True)
 
 print("Loading data... finished!")
 
@@ -171,9 +154,9 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_batches_per
 def train():
     model.train() # Turn on the train mode
     total_loss = 0.
-    for X_concat, input_x, input_y, c_concat in batch_loader():
+    for X_concat, input_x, input_y, c_concat in tqdm(dataloader, desc='train'):
         optimizer.zero_grad()
-        logits = model(X_concat, input_x, input_y, c_concat)
+        logits = model(X_concat.to(device), input_x.to(device), input_y.to(device), c_concat.to(device))
         loss = torch.sum(logits)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
@@ -187,16 +170,16 @@ def evaluate():
     with torch.no_grad():
         # evaluating
         node_embeddings = model.ss.weight
-        graph_embeddings = torch.spmm(graph_pool, node_embeddings).data.cpu().numpy()
-        graph_embeddings_add = np.concatenate((graph_embeddings, additional_info.numpy()), 1)
-        print(graph_embeddings_add.shape)
+        graph_embeddings = torch.spmm(graph_pool, node_embeddings.cpu()).data.numpy()
+        graph_embeddings = np.concatenate((graph_embeddings, additional_info.numpy()), 1)
+        print(graph_embeddings.shape)
 
         acc_10folds = []
         rand_seed = np.random.randint(0xFFFF)
         for fold_idx in range(10):
             train_idx, test_idx = separate_data_idx(graphs, fold_idx, rand_seed)
-            train_graph_embeddings = graph_embeddings_add[train_idx]
-            test_graph_embeddings = graph_embeddings_add[test_idx]
+            train_graph_embeddings = graph_embeddings[train_idx]
+            test_graph_embeddings = graph_embeddings[test_idx]
             train_labels = graph_labels[train_idx].astype(int)
             test_labels = graph_labels[test_idx].astype(int)
 
@@ -204,7 +187,7 @@ def evaluate():
             cls.fit(train_graph_embeddings, train_labels)
             ACC = cls.score(test_graph_embeddings, test_labels)
             acc_10folds.append(ACC)
-            print('epoch ', epoch, ' fold ', fold_idx, ' acc ', ACC)
+        print(f'evaluate: {" ".join([f"{acc*100:.3f}" for acc in acc_10folds])}')
 
         mean_10folds = statistics.mean(acc_10folds)
         std_10folds = statistics.stdev(acc_10folds)
@@ -216,7 +199,8 @@ def inspect():
     model.eval()
     with torch.no_grad():
         node_embeddings = model.ss.weight
-        graph_embeddings = torch.spmm(graph_pool, node_embeddings).data.cpu().numpy()
+        graph_embeddings = torch.spmm(graph_pool, node_embeddings.cpu()).data.numpy()
+        graph_embeddings = np.concatenate((graph_embeddings, additional_info.numpy()), 1)
 
         train_idx = [idx for idx, graph in enumerate(graphs) if graph.label is not None]
         train_graph_embeddings = graph_embeddings[train_idx]
@@ -249,20 +233,25 @@ pth_path = out_dir/'model.pth'
 with open(out_dir/'args.json', 'w') as f:
     json.dump(vars(args), f, indent=4)
 
-cost_loss = []
-for epoch in range(1, args.num_epochs + 1):
-    epoch_start_time = time.time()
-    train_loss = train()
-    cost_loss.append(train_loss)
-    mean_10folds, std_10folds = evaluate()
-    print('| epoch {:3d} | time: {:5.2f}s | loss {:5.2f} | mean {:5.2f} | std {:5.2f} | '.format(
-                epoch, (time.time() - epoch_start_time), train_loss, mean_10folds*100, std_10folds*100))
+if not args.only_test:
+    cost_loss = []
+    for epoch in range(1, args.num_epochs + 1):
+        epoch_start_time = time.time()
+        train_loss = train()
+        cost_loss.append(train_loss)
+        mean_10folds, std_10folds = evaluate()
+        print('| epoch {:3d} | time: {:5.2f}s | loss {:5.2f} | mean {:5.2f} | std {:5.2f} | '.format(
+                    epoch, (time.time() - epoch_start_time), train_loss, mean_10folds*100, std_10folds*100))
 
-    if epoch > 5 and cost_loss[-1] > np.mean(cost_loss[-6:-1]):
-        scheduler.step()
+        if epoch > 5 and cost_loss[-1] > np.mean(cost_loss[-6:-1]):
+            scheduler.step()
 
-    write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
-    torch.save(model.state_dict(), pth_path)
+        write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
+        torch.save(model.state_dict(), pth_path)
+        if not args.only_train:
+            inspect()
+else:
+    model.load_state_dict(torch.load(pth_path))
     inspect()
 
 write_acc.close()

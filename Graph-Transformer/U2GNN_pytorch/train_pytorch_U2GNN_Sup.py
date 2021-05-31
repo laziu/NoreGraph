@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
 
 import numpy as np
 import time
@@ -11,6 +12,8 @@ from pytorch_U2GNN_Sup import *
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from scipy.sparse import coo_matrix
 from util import *
+import json
+from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -32,6 +35,8 @@ parser.add_argument("--num_timesteps", default=1, type=int, help="Timestep T ~ N
 parser.add_argument("--ff_hidden_size", default=1024, type=int, help="The hidden size for the feedforward layer")
 parser.add_argument("--num_neighbors", default=4, type=int, help="")
 parser.add_argument('--fold_idx', type=int, default=1, help='The fold index. 0-9.')
+parser.add_argument('--only_train', type=bool, default=False)
+parser.add_argument('--only_test', type=bool, default=False)
 args = parser.parse_args()
 
 print(args)
@@ -40,10 +45,13 @@ print(args)
 print("Loading data...")
 graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
-# graph_labels = np.array([graph.label for graph in graphs])
-# train_idx, test_idx = separate_data_idx(graphs, args.fold_idx)
-train_graphs, test_graphs = separate_data(graphs, args.fold_idx, None)
-feature_dim_size = graphs[0].node_features.shape[1]
+weird = [graph.centrality_weirdness for graph in graphs]
+size = [len(graph.g) for graph in graphs]
+weird = torch.Tensor(weird).reshape(-1, 1) # batch size
+size  = torch.Tensor(size ).reshape(-1, 1) # batch size
+additional_info = torch.cat((weird, size), dim = 1)
+
+feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
 print(feature_dim_size)
 if "REDDIT" in args.dataset:
     feature_dim_size = 4
@@ -79,14 +87,17 @@ def get_graphpool(batch_graph):
     idx = torch.LongTensor(idx).transpose(0, 1)
     graph_pool = torch.sparse.FloatTensor(idx, elem, torch.Size([len(batch_graph), start_idx[-1]]))
 
-    return graph_pool.to(device)
+    return graph_pool
 
-def get_batch_data(batch_graph):
+def get_batch_data(selected_idx):
+    batch_graph = [graphs[idx] for idx in selected_idx]
+    c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
+    c_concat = torch.from_numpy(c_concat).to(torch.float32)
     X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
     if "REDDIT" in args.dataset:
         X_concat = np.tile(X_concat, feature_dim_size) #[1,1,1,1]
         X_concat = X_concat * 0.01
-    X_concat = torch.from_numpy(X_concat).to(device)
+    X_concat = torch.from_numpy(X_concat)
     # graph-level sum pooling
     graph_pool = get_graphpool(batch_graph)
 
@@ -104,25 +115,22 @@ def get_batch_data(batch_graph):
         else:
             input_neighbors.append([input_node for _ in range(args.num_neighbors+1)])
     input_x = np.array(input_neighbors)
-    input_x = torch.from_numpy(input_x).long().to(device)
+    input_x = torch.from_numpy(input_x).long()
     #
-    graph_labels = np.array([graph.label for graph in batch_graph])
-    graph_labels = torch.from_numpy(graph_labels).to(device)
+    graph_labels = np.array([graph.label or 0 for graph in batch_graph]).astype(int)
+    graph_labels = torch.from_numpy(graph_labels)
 
-    return input_x, graph_pool, X_concat, graph_labels
+    return selected_idx, input_x, X_concat, graph_labels, c_concat
 
-def batch_loader():
-    permuted_idx = np.random.permutation(len(graphs))
-    length = int(np.ceil(len(graphs) / args.batch_size))
+class IndexDataset(Dataset):
+    def __init__(self, idx):
+        super().__init__()
+        self.idx = idx
+    def __len__(self): return len(self.idx)
+    def __getitem__(self, i): return self.idx[i]
 
-    for i in range(length):
-        start = i * args.batch_size
-        end = min((i+1) * args.batch_size, len(graphs))
-        selected_idx = permuted_idx[start:end]
-
-        batch_graph = [train_graphs[idx] for idx in selected_idx]
-        input_x, graph_pool, X_concat, graph_labels = get_batch_data(batch_graph)
-        yield input_x, graph_pool, X_concat, graph_labels
+trainidxset = IndexDataset([i for i, graph in enumerate(graphs) if graph.label is not None])
+trainloader = DataLoader(trainidxset, batch_size=args.batch_size, shuffle=True,  collate_fn=get_batch_data, pin_memory=True)
 
 print("Loading data... finished!")
 
@@ -137,47 +145,34 @@ def cross_entropy(pred, soft_targets): # use nn.CrossEntropyLoss if not using so
 
 # criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-num_batches_per_epoch = int((len(train_graphs) - 1) / args.batch_size) + 1
+num_batches_per_epoch = int((len(graphs) - 1) / args.batch_size) + 1
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_batches_per_epoch, gamma=0.1)
 
 def train():
     model.train() # Turn on the train mode
     total_loss = 0.
-    for input_x, graph_pool, X_concat, graph_labels in batch_loader():
-        graph_labels = label_smoothing(graph_labels, num_classes)
+    total_correct = 0
+    for selected_idx, input_x, X_concat, graph_labels, c_concat in tqdm(trainloader, desc='train'):
+        input_x = input_x.to(device)
+        X_concat = X_concat.to(device)
+        graph_labels = graph_labels.to(device)
+        c_concat = c_concat.to(device)
+        graph_pool = get_graphpool([graphs[idx] for idx in selected_idx]).to(device)
+        smoothed_labels = label_smoothing(graph_labels, num_classes)
         optimizer.zero_grad()
-        prediction_scores = model(input_x, graph_pool, X_concat)
+        prediction_scores = model(input_x, graph_pool, X_concat, c_concat)
         # loss = criterion(prediction_scores, graph_labels)
-        loss = cross_entropy(prediction_scores, graph_labels)
+        loss = cross_entropy(prediction_scores, smoothed_labels)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5) # prevent the exploding gradient problem
         optimizer.step()
         total_loss += loss.item()
 
-    return total_loss
+        predictions = prediction_scores.max(1, keepdim=True)[1]
+        total_correct += predictions.eq(graph_labels.view_as(predictions)).sum().cpu().item()
 
-def evaluate():
-    model.eval() # Turn on the evaluation mode
-    total_loss = 0.
-    with torch.no_grad():
-        # evaluating
-        prediction_output = []
-        idx = np.arange(len(test_graphs))
-        for i in range(0, len(test_graphs), args.batch_size):
-            sampled_idx = idx[i:i + args.batch_size]
-            if len(sampled_idx) == 0:
-                continue
-            batch_test_graphs = [test_graphs[j] for j in sampled_idx]
-            test_input_x, test_graph_pool, test_X_concat, _ = get_batch_data(batch_test_graphs)
-            prediction_scores = model(test_input_x, test_graph_pool, test_X_concat).detach()
-            prediction_output.append(prediction_scores)
-    prediction_output = torch.cat(prediction_output, 0)
-    predictions = prediction_output.max(1, keepdim=True)[1]
-    labels = torch.LongTensor([graph.label for graph in test_graphs]).to(device)
-    correct = predictions.eq(labels.view_as(predictions)).sum().cpu().item()
-    acc_test = correct / float(len(test_graphs))
-
-    return acc_test
+    acc_test = total_correct / float(len(trainidxset))
+    return total_loss, acc_test
 
 def inspect():
     model.eval()
@@ -188,21 +183,21 @@ def inspect():
         with open(project_root/'data/test.txt', 'r') as fi:
             for line in fi:
                 test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
-                test_internal_idx = [graph_name_map[test_idx]]
+                test_internal_idx = graph_name_map[test_idx]
                 csv_idx.append(test_idx)
                 idx.append(test_internal_idx)
         idx = np.array(idx)
         for i in range(0, len(idx), args.batch_size):
-            sampled_idx = idx[i:i + args.batch_size]
-            if len(sampled_idx) == 0:
-                continue
-            batch_test_graphs = [graphs[j] for j in sampled_idx]
-            test_input_x, test_graph_pool, test_X_concat, _ = get_batch_data(batch_test_graphs)
-            prediction_scores = model(test_input_x, test_graph_pool, test_X_concat).detach()
+            selected_idx = idx[i:i + args.batch_size]
+            if len(selected_idx) == 0: continue
+            selected_idx, input_x, X_concat, _, c_concat = get_batch_data(selected_idx)
+            graph_pool = get_graphpool([graphs[idx] for idx in selected_idx])
+            prediction_scores = model(input_x.to(device), graph_pool.to(device), X_concat.to(device), c_concat.to(device)).detach()
             prediction_output.append(prediction_scores)
         prediction_output = torch.cat(prediction_output, 0)
         predictions = prediction_output.max(1, keepdim=True)[1]
-        labels_est = [label_map[l] for l in predictions if l in label_map]
+        labels_est = [l.item() for l in predictions.cpu().squeeze()]
+        labels_est = [(label_map[l] if l in label_map else l) for l in labels_est]
         with open(out_dir/'test_sample.csv', 'w') as fo:
             fo.write('Id,Category\n')
             for t_idx, label in zip(csv_idx, labels_est):
@@ -216,22 +211,28 @@ print("Writing to {}\n".format(out_dir))
 checkpoint_dir = out_dir/"checkpoints"
 checkpoint_dir.mkdir(exist_ok=True, parents=True)
 write_acc = open(checkpoint_dir/'model_acc.txt', 'w')
+pth_path = out_dir/'model.pth'
 
-cost_loss = []
-for epoch in range(1, args.num_epochs + 1):
-    train_graphs, test_graphs = separate_data(graphs, args.fold_idx, None)
+if not args.only_test:
+    cost_loss = []
+    for epoch in range(1, args.num_epochs + 1):
+        train_graphs, test_graphs = separate_data(graphs, args.fold_idx, None)
 
-    epoch_start_time = time.time()
-    train_loss = train()
-    cost_loss.append(train_loss)
-    acc_test = evaluate()
-    print('| epoch {:3d} | time: {:5.2f}s | loss {:5.2f} | test acc {:5.2f} | '.format(
-                epoch, (time.time() - epoch_start_time), train_loss, acc_test*100))
+        epoch_start_time = time.time()
+        train_loss, acc_test = train()
+        cost_loss.append(train_loss)
+        print('| epoch {:3d} | time: {:5.2f}s | loss {:5.2f} | test acc {:5.2f} | '.format(
+                    epoch, (time.time() - epoch_start_time), train_loss, acc_test*100))
 
-    if epoch > 5 and cost_loss[-1] > np.mean(cost_loss[-6:-1]):
-        scheduler.step()
+        if epoch > 5 and cost_loss[-1] > np.mean(cost_loss[-6:-1]):
+            scheduler.step()
 
-    write_acc.write('epoch ' + str(epoch) + ' fold ' + str(args.fold_idx) + ' acc ' + str(acc_test*100) + '%\n')
+        write_acc.write('epoch ' + str(epoch) + ' fold ' + str(args.fold_idx) + ' acc ' + str(acc_test*100) + '%\n')
+        torch.save(model.state_dict(), pth_path)
+        if not args.only_train:
+            inspect()
+else:
+    model.load_state_dict(torch.load(pth_path))
     inspect()
 
 write_acc.close()

@@ -6,6 +6,7 @@ import scipy.sparse as sp
 from sklearn.model_selection import StratifiedKFold
 import pickle
 from pathlib import Path
+from tqdm import tqdm
 
 project_root = Path(__file__).parents[2].absolute()
 current_root = Path(__file__).parent.absolute()
@@ -31,7 +32,7 @@ class S2VGraph(object):
         self.max_neighbor = 0
         self.name = None
         self.centrality = []
-
+        self.centrality_weirdness = 0
 
 def load_data(dataset):
     '''
@@ -57,8 +58,7 @@ def load_data(dataset):
         ngi_dict = {}  # node_index -> index in graph
 
         with open(project_root/'data/train.txt', 'r') as f:
-            print('reading data/train.txt')
-            for line in f:
+            for line in tqdm(f, desc='reading data/train.txt'):
                 row = re.findall(r'\d+', line)
                 gi, l = [int(w) for w in row]
                 if not l in label_dict:
@@ -68,16 +68,14 @@ def load_data(dataset):
                 l_dict[gi] = l
 
         with open(project_root/'data/test.txt', 'r') as f:
-            print('reading data/test.txt')
-            for line in f:
+            for line in tqdm(f, desc='reading data/test.txt'):
                 row = re.findall(r'\d+', line)
                 gi = int(row[0])
                 g_dict[gi] = nx.Graph()
                 l_dict[gi] = None
 
         with open(project_root/'data/graph_ind.txt', 'r') as f:
-            print('reading data/graph_ind.txt')
-            for line in f:
+            for line in tqdm(f, desc='reading data/graph_ind.txt'):
                 row = re.findall(r'\d+', line)
                 ni, gi = [int(w) for w in row]
                 if gi in g_dict:
@@ -88,8 +86,7 @@ def load_data(dataset):
                     ngi_dict[ni] = ngi
 
         with open(project_root/'data/graph.txt', 'r') as f:
-            print('reading data/graph.txt')
-            for line in f:
+            for line in tqdm(f, desc='reading data/graph.txt'):
                 row = re.findall(r'\d+', line)
                 ni, nj = [int(w) for w in row]
                 if ni in n2g_dict:
@@ -108,12 +105,10 @@ def load_data(dataset):
             graph.name = gi
             g_list.append(graph)
 
-        print('processing')
-
     else:
-        with open(project_root/'Graph-Transformer/dataset/%s/%s.txt' % (dataset, dataset), 'r') as f:
+        with open(project_root/f'Graph-Transformer/dataset/{dataset}/{dataset}.txt', 'r') as f:
             n_g = int(f.readline().strip())
-            for i in range(n_g):
+            for i in tqdm(range(n_g), desc=f'reading {dataset}.txt'):
                 row = f.readline().strip().split()
                 n, l = [int(w) for w in row]
                 if not l in label_dict:
@@ -157,7 +152,7 @@ def load_data(dataset):
                 g_list.append(S2VGraph(g, l, node_tags))
 
     #add labels and edge_mat       
-    for g in g_list:
+    for g in tqdm(g_list, desc="postprocessing"):
         g.neighbors = [[] for i in range(len(g.g))]
         for i, j in g.g.edges():
             g.neighbors[i].append(j)
@@ -173,9 +168,19 @@ def load_data(dataset):
         edges = [list(pair) for pair in g.g.edges()]
         edges.extend([[i, j] for j, i in edges])
 
-        deg_list = list(dict(g.g.degree(range(len(g.g)))).values())
+        #deg_list = list(dict(g.g.degree(range(len(g.g)))).values())
 
         g.edge_mat = np.transpose(np.array(edges, dtype=np.int32), (1,0))
+
+        b_cent = list(nx.betweenness_centrality(g.g).values())
+        c_cent = list(nx.closeness_centrality  (g.g).values())
+        d_cent = list(nx.degree_centrality     (g.g).values())
+        g.centrality = np.stack([b_cent, c_cent, d_cent], axis=1)
+
+        weirdness = (max(map(float, b_cent)) < 0.00001) or \
+                    (min(map(float, c_cent)) > 0.99   ) or \
+                    (min(map(float, d_cent)) > 0.99   )
+        g.centrality_weirdness = float(weirdness)
 
     if degree_as_tag:
         for g in g_list:

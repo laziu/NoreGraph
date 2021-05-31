@@ -13,6 +13,7 @@ from scipy.sparse import coo_matrix
 from util import *
 import statistics
 from sklearn.linear_model import LogisticRegression
+from tqdm import tqdm
 
 # Parameters
 # ==================================================
@@ -32,15 +33,22 @@ parser.add_argument("--dropout", default=0.5, type=float, help="Dropout")
 parser.add_argument("--num_GNN_layers", default=2, type=int, help="Number of stacked layers")
 parser.add_argument("--hidden_size", default=64, type=int, help="size of hidden layers")
 parser.add_argument('--num_sampled', default=512, type=int, help='')
+parser.add_argument('--load_state', default=False, type=bool, help='Load saved model variables.')
 args = parser.parse_args()
 
 print(args)
 
 # Load data
 print("Loading data...")
-graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.dataset)
+graphs, _, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
-feature_dim_size = graphs[0].node_features.shape[1]
+weird = [graph.centrality_weirdness for graph in graphs]
+size = [len(graph.g) for graph in graphs]
+weird = np.array(weird).reshape(-1, 1) # batch size
+size  = np.array(size ).reshape(-1, 1) # batch size
+additional_info = np.stack((weird, size), axis=1)
+
+feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
 graph_labels = np.array([graph.label for graph in graphs])
 if "REDDIT" in args.dataset:
     feature_dim_size = 4
@@ -104,14 +112,16 @@ def get_batch_data(batch_graph):
     Adj_block = get_Adj_matrix(batch_graph)
     Adj_block = sparse_to_tuple(Adj_block)
 
+    c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
+    X_concat = np.concatenate((X_concat, c_concat), axis=1)
+
     num_features_nonzero = X_concat[1].shape
     return Adj_block, X_concat, num_features_nonzero
 
+batch_total_length = int(np.ceil(len(graphs) / args.batch_size))
 def batch_loader():
     permuted_idx = np.random.permutation(len(graphs))
-    length = int(np.ceil(len(graphs) / args.batch_size))
-
-    for i in range(length):
+    for i in range(batch_total_length):
         start = i * args.batch_size
         end = min((i+1) * args.batch_size, len(graphs))
         selected_idx = permuted_idx[start:end]
@@ -127,8 +137,8 @@ print("Loading data... finished!")
 with tf.Graph().as_default():
     session_conf = tf.compat.v1.ConfigProto(allow_soft_placement=args.allow_soft_placement, log_device_placement=args.log_device_placement)
     session_conf.gpu_options.allow_growth = True
-    sess = tf.compat.v1.Session(config=session_conf)
-    with sess.as_default():
+    with tf.compat.v1.Session(config=session_conf) as sess:
+        sess.as_default()
         global_step = tf.Variable(0, name="global_step", trainable=False)
         unsup_gcn = GCN_graph_cls(feature_dim_size=feature_dim_size,
                       hidden_size=args.hidden_size,
@@ -154,6 +164,12 @@ with tf.Graph().as_default():
         sess.run(tf.compat.v1.global_variables_initializer())
         graph = tf.compat.v1.get_default_graph()
 
+        saver = tf.compat.v1.train.Saver()
+        ckpt_path = str(out_dir/"model")
+        ckpt = tf.compat.v1.train.get_checkpoint_state(ckpt_path)
+        if ckpt and ckpt.model_checkpoint_path:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+
         def train_step(Adj_block, X_concat, num_features_nonzero, idx_nodes):
             feed_dict = {
                 unsup_gcn.Adj_block: Adj_block,
@@ -170,17 +186,21 @@ with tf.Graph().as_default():
         idx_epoch = 0
         num_batches_per_epoch = int((len(graphs) - 1) / args.batch_size) + 1
         for epoch in range(1, args.num_epochs+1):
-
+            # train
             loss = 0
-            for Adj_block, X_concat, num_features_nonzero, idx_nodes in batch_loader():
+            for Adj_block, X_concat, num_features_nonzero, idx_nodes in tqdm(batch_loader(), total=batch_total_length):
                 loss += train_step(Adj_block, X_concat, num_features_nonzero, idx_nodes)
                 # current_step = tf.compat.v1.train.global_step(sess, global_step)
+            saver.save(sess, ckpt_path)
             print(loss)
             # It will give tensor object
             node_embeddings = graph.get_tensor_by_name('embedding/node_embeddings:0')
             node_embeddings = sess.run(node_embeddings)
             graph_embeddings = graph_pool.dot(node_embeddings)
-            #
+            graph_embeddings = np.concatenate((graph_embeddings, additional_info), 1)
+            print(graph_embeddings.shape)
+            
+            # evaluate
             acc_10folds = []
             rand_seed = np.random.randint(0xFFFF)
             for fold_idx in range(10):
@@ -190,7 +210,7 @@ with tf.Graph().as_default():
                 train_labels = graph_labels[train_idx].astype(int)
                 test_labels = graph_labels[test_idx].astype(int)
 
-                cls = LogisticRegression(tol=0.001)
+                cls = LogisticRegression(solver='liblinear', tol=0.001, multi_class='auto')
                 cls.fit(train_graph_embeddings, train_labels)
                 ACC = cls.score(test_graph_embeddings, test_labels)
                 acc_10folds.append(ACC)
@@ -202,18 +222,23 @@ with tf.Graph().as_default():
 
             write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
 
-        write_acc.close()
+            # inspect
+            train_idx = [idx for idx, graph in enumerate(graphs) if graph.label is not None]
+            train_graph_embeddings = graph_embeddings[train_idx]
+            train_labels = graph_labels[train_idx].astype(int)
 
-        cls = LogisticRegression(tol=0.001, max_iter=1000)
-        cls.fit(train_graph_embeddings, train_labels)
-        out_path = out_dir/'test_sample.csv'
-        with open(project_root/'data/test.txt', 'r') as fi, open(out_path, 'w') as fo:
-            fo.write('Id,Category\n')
-            for line in fi:
-                test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
-                test_internal_idx = [graph_name_map[test_idx]]
-                test_graph_embedding = graph_embeddings[test_internal_idx]
-                test_label_estimated = cls.predict(test_graph_embedding).item()
-                if test_label_estimated in label_map:
-                    test_label_estimated = label_map[test_label_estimated]
-                fo.write(f'{test_idx},{test_label_estimated}\n')
+            cls = LogisticRegression(solver='liblinear', tol=0.001, multi_class='auto')
+            cls.fit(train_graph_embeddings, train_labels)
+
+            with open(project_root/'data/test.txt', 'r') as fi, open(out_dir/'test_sample.csv', 'w') as fo:
+                fo.write('Id,Category\n')
+                for line in fi:
+                    test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
+                    test_internal_idx = [graph_name_map[test_idx]]
+                    test_graph_embedding = graph_embeddings[test_internal_idx]
+                    test_label_estimated = cls.predict(test_graph_embedding).item()
+                    if test_label_estimated in label_map:
+                        test_label_estimated = label_map[test_label_estimated]
+                    fo.write(f'{test_idx},{test_label_estimated}\n')
+
+        write_acc.close()

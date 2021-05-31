@@ -27,9 +27,11 @@ class TransformerU2GNN(nn.Module):
             self.predictions.append(nn.Linear(self.feature_dim_size, self.num_classes))
             self.dropouts.append(nn.Dropout(dropout))
 
-    def forward(self, input_x, graph_pool, X_concat):
+    def forward(self, input_x, graph_pool, X_concat, c_concat):
         prediction_scores = 0
-        input_Tr = F.embedding(input_x, X_concat)
+        input_Tr1 = F.embedding(input_x, X_concat)
+        input_Tr2 = F.embedding(input_x, c_concat)
+        input_Tr = torch.cat((input_Tr1, input_Tr2), dim=2)
         for layer_idx in range(self.num_U2GNN_layers):
             #
             output_Tr = self.u2gnn_layers[layer_idx](input_Tr)
