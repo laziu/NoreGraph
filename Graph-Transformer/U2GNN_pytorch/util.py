@@ -7,6 +7,8 @@ from sklearn.model_selection import StratifiedKFold
 import pickle
 from pathlib import Path
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
+from multiprocessing import cpu_count
 
 project_root = Path(__file__).parents[2].absolute()
 current_root = Path(__file__).parent.absolute()
@@ -33,6 +35,35 @@ class S2VGraph(object):
         self.name = None
         self.centrality = []
         self.centrality_weirdness = 0
+
+def _post_processing(g: S2VGraph):
+    g.neighbors = [[] for i in range(len(g.g))]
+    for i, j in g.g.edges():
+        g.neighbors[i].append(j)
+        g.neighbors[j].append(i)
+    degree_list = []
+    for i in range(len(g.g)):
+        g.neighbors[i] = g.neighbors[i]
+        degree_list.append(len(g.neighbors[i]))
+    g.max_neighbor = max(degree_list)
+
+    edges = [list(pair) for pair in g.g.edges()]
+    edges.extend([[i, j] for j, i in edges])
+
+    #deg_list = list(dict(g.g.degree(range(len(g.g)))).values())
+
+    g.edge_mat = np.transpose(np.array(edges, dtype=np.int32), (1,0))
+
+    b_cent = list(nx.betweenness_centrality(g.g).values())
+    c_cent = list(nx.closeness_centrality  (g.g).values())
+    d_cent = list(nx.degree_centrality     (g.g).values())
+    g.centrality = np.stack([b_cent, c_cent, d_cent], axis=1)
+
+    weirdness = (max(map(float, b_cent)) < 0.00001) or \
+                (min(map(float, c_cent)) > 0.99   ) or \
+                (min(map(float, d_cent)) > 0.99   )
+    g.centrality_weirdness = float(weirdness)
+    return g
 
 def load_data(dataset):
     '''
@@ -152,35 +183,10 @@ def load_data(dataset):
                 g_list.append(S2VGraph(g, l, node_tags))
 
     #add labels and edge_mat       
-    for g in tqdm(g_list, desc="postprocessing"):
-        g.neighbors = [[] for i in range(len(g.g))]
-        for i, j in g.g.edges():
-            g.neighbors[i].append(j)
-            g.neighbors[j].append(i)
-        degree_list = []
-        for i in range(len(g.g)):
-            g.neighbors[i] = g.neighbors[i]
-            degree_list.append(len(g.neighbors[i]))
-        g.max_neighbor = max(degree_list)
-
+    for g in g_list:
         g.label = label_dict[g.label] if g.label in label_dict else None
 
-        edges = [list(pair) for pair in g.g.edges()]
-        edges.extend([[i, j] for j, i in edges])
-
-        #deg_list = list(dict(g.g.degree(range(len(g.g)))).values())
-
-        g.edge_mat = np.transpose(np.array(edges, dtype=np.int32), (1,0))
-
-        b_cent = list(nx.betweenness_centrality(g.g).values())
-        c_cent = list(nx.closeness_centrality  (g.g).values())
-        d_cent = list(nx.degree_centrality     (g.g).values())
-        g.centrality = np.stack([b_cent, c_cent, d_cent], axis=1)
-
-        weirdness = (max(map(float, b_cent)) < 0.00001) or \
-                    (min(map(float, c_cent)) > 0.99   ) or \
-                    (min(map(float, d_cent)) > 0.99   )
-        g.centrality_weirdness = float(weirdness)
+    g_list = process_map(_post_processing, g_list, desc="postprocessing", chunksize=4, max_workers=(cpu_count() - 2))
 
     if degree_as_tag:
         for g in g_list:

@@ -1,9 +1,10 @@
 #! /usr/bin/env python
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
 import tensorflow as tf
 import numpy as np
 
-import os
 import time
 import datetime
 from model_unsup_gcn import GCN_graph_cls
@@ -46,7 +47,7 @@ weird = [graph.centrality_weirdness for graph in graphs]
 size = [len(graph.g) for graph in graphs]
 weird = np.array(weird).reshape(-1, 1) # batch size
 size  = np.array(size ).reshape(-1, 1) # batch size
-additional_info = np.stack((weird, size), axis=1)
+additional_info = np.concatenate((weird, size), 1)
 
 feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
 graph_labels = np.array([graph.label for graph in graphs])
@@ -105,15 +106,14 @@ def get_batch_data(batch_graph):
     if "REDDIT" in args.dataset:
         X_concat = np.tile(X_concat, feature_dim_size) #[1,1,1,1]
         X_concat = X_concat * 0.01
+    c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
+    X_concat = np.concatenate((X_concat, c_concat), axis=1)
 
     X_concat = coo_matrix(X_concat)
     X_concat = sparse_to_tuple(X_concat)
     # adj
     Adj_block = get_Adj_matrix(batch_graph)
     Adj_block = sparse_to_tuple(Adj_block)
-
-    c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
-    X_concat = np.concatenate((X_concat, c_concat), axis=1)
 
     num_features_nonzero = X_concat[1].shape
     return Adj_block, X_concat, num_features_nonzero
@@ -214,10 +214,10 @@ with tf.Graph().as_default():
                 cls.fit(train_graph_embeddings, train_labels)
                 ACC = cls.score(test_graph_embeddings, test_labels)
                 acc_10folds.append(ACC)
-                print('epoch ', epoch, ' fold ', fold_idx, ' acc ', ACC)
 
             mean_10folds = statistics.mean(acc_10folds)
             std_10folds = statistics.stdev(acc_10folds)
+            print(f'epoch {epoch} acc [ {"  ".join([f"{acc*100:6.3f}%" for acc in acc_10folds])} ]')
             print('epoch ', epoch, ' mean: ', str(mean_10folds*100), ' std: ', str(std_10folds*100))
 
             write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
