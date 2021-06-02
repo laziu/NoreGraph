@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 
-from log_uniform import LogUniformSampler
+from log_uniform_sampler import LogUniformSampler
 
 """LogUniformSampler is taken from https://github.com/rdspring1/PyTorch_GBW_LM"""
 
