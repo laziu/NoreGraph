@@ -15,6 +15,7 @@ current_root = Path(__file__).parent.absolute()
 
 """Adapted from https://github.com/weihua916/powerful-gnns/blob/master/util.py"""
 
+
 class S2VGraph(object):
     def __init__(self, g, label, node_tags=None, node_features=None):
         '''
@@ -36,6 +37,7 @@ class S2VGraph(object):
         self.centrality = []
         self.centrality_weirdness = 0
 
+
 def _post_processing(g: S2VGraph):
     g.neighbors = [[] for i in range(len(g.g))]
     for i, j in g.g.edges():
@@ -52,18 +54,19 @@ def _post_processing(g: S2VGraph):
 
     #deg_list = list(dict(g.g.degree(range(len(g.g)))).values())
 
-    g.edge_mat = np.transpose(np.array(edges, dtype=np.int32), (1,0))
+    g.edge_mat = np.transpose(np.array(edges, dtype=np.int32), (1, 0))
 
     b_cent = list(nx.betweenness_centrality(g.g).values())
-    c_cent = list(nx.closeness_centrality  (g.g).values())
-    d_cent = list(nx.degree_centrality     (g.g).values())
+    c_cent = list(nx.closeness_centrality(g.g).values())
+    d_cent = list(nx.degree_centrality(g.g).values())
     g.centrality = np.stack([b_cent, c_cent, d_cent], axis=1)
 
     weirdness = (max(map(float, b_cent)) < 0.00001) or \
-                (min(map(float, c_cent)) > 0.99   ) or \
-                (min(map(float, d_cent)) > 0.99   )
+                (min(map(float, c_cent)) > 0.99) or \
+                (min(map(float, d_cent)) > 0.99)
     g.centrality_weirdness = float(weirdness)
     return g
+
 
 def load_data(dataset):
     '''
@@ -182,7 +185,7 @@ def load_data(dataset):
 
                 g_list.append(S2VGraph(g, l, node_tags))
 
-    #add labels and edge_mat       
+    # add labels and edge_mat
     for g in g_list:
         g.label = label_dict[g.label] if g.label in label_dict else None
 
@@ -192,18 +195,17 @@ def load_data(dataset):
         for g in g_list:
             g.node_tags = list(dict(g.g.degree).values())
 
-    #Extracting unique tag labels   
+    # Extracting unique tag labels
     tagset = set([])
     for g in g_list:
         tagset = tagset.union(set(g.node_tags))
 
     tagset = list(tagset)
-    tag2index = {tagset[i]:i for i in range(len(tagset))}
+    tag2index = {tagset[i]: i for i in range(len(tagset))}
 
     for g in g_list:
         g.node_features = np.zeros((len(g.node_tags), len(tagset)), dtype=np.float32)
         g.node_features[range(len(g.node_tags)), [tag2index[tag] for tag in g.node_tags]] = 1
-
 
     print('# classes: %d' % len(label_dict))
     print('# maximum node tag: %d' % len(tagset))
@@ -216,6 +218,7 @@ def load_data(dataset):
 
     return g_list, len(label_dict), label_map, feat_map, graph_map
 
+
 def load_cached_data(dataset):
     try:
         with open(project_root/f"dataset_{dataset}.pkl", "rb") as f:
@@ -225,6 +228,7 @@ def load_cached_data(dataset):
         with open(project_root/f"dataset_{dataset}.pkl", "wb") as f:
             pickle.dump(chunk, f)
     return chunk
+
 
 def separate_data(graph_list, fold_idx, seed=0):
     assert 0 <= fold_idx and fold_idx < 10, "fold_idx must be from 0 to 9."
@@ -242,8 +246,9 @@ def separate_data(graph_list, fold_idx, seed=0):
 
     return train_graph_list, test_graph_list
 
-"""Get indexes of train and test sets"""
+
 def separate_data_idx(graph_list, fold_idx, seed=0):
+    """ Get indexes of train and test sets """
     assert 0 <= fold_idx and fold_idx < 10, "fold_idx must be from 0 to 9."
     skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=seed)
 
@@ -256,8 +261,9 @@ def separate_data_idx(graph_list, fold_idx, seed=0):
 
     return indices[train_idx], indices[test_idx]
 
-"""Convert sparse matrix to tuple representation."""
+
 def sparse_to_tuple(sparse_mx):
+    """ Convert sparse matrix to tuple representation. """
     def to_tuple(mx):
         if not sp.isspmatrix_coo(mx):
             mx = mx.tocoo()

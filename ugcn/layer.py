@@ -6,10 +6,12 @@ import numpy as np
     Modified from https://github.com/tkipf/gcn/blob/master/gcn/layers.py
 '''
 
+
 def uniform(shape, scale=0.05, name=None):
     """Uniform init."""
     initial = tf.random_uniform(shape, minval=-scale, maxval=scale, dtype=tf.float32)
     return tf.Variable(initial, name=name)
+
 
 def glorot(shape, name=None):
     """Glorot & Bengio (AISTATS 2010) init."""
@@ -17,21 +19,25 @@ def glorot(shape, name=None):
     initial = tf.compat.v1.random_uniform(shape, minval=-init_range, maxval=init_range, dtype=tf.float32)
     return tf.Variable(initial, name=name)
 
+
 def zeros(shape, name=None):
     """All zeros."""
     initial = tf.zeros(shape, dtype=tf.float32)
     return tf.Variable(initial, name=name)
+
 
 def ones(shape, name=None):
     """All ones."""
     initial = tf.ones(shape, dtype=tf.float32)
     return tf.Variable(initial, name=name)
 
+
 flags = tf.compat.v1.flags
 FLAGS = flags.FLAGS
 
 # global unique layer ID dictionary for layer name assignment
 _LAYER_UIDS = {}
+
 
 def get_layer_uid(layer_name=''):
     """Helper function, assigns unique layer IDs."""
@@ -42,6 +48,7 @@ def get_layer_uid(layer_name=''):
         _LAYER_UIDS[layer_name] += 1
         return _LAYER_UIDS[layer_name]
 
+
 def sparse_dropout(x, keep_prob, noise_shape):
     """Dropout for sparse tensors."""
     random_tensor = keep_prob
@@ -50,6 +57,7 @@ def sparse_dropout(x, keep_prob, noise_shape):
     pre_out = tf.compat.v1.sparse_retain(x, dropout_mask)
     return pre_out * (1./keep_prob)
 
+
 def dot(x, y, sparse=False):
     """Wrapper for tf.matmul (sparse vs dense)."""
     if sparse:
@@ -57,6 +65,7 @@ def dot(x, y, sparse=False):
     else:
         res = tf.matmul(x, y)
     return res
+
 
 class Layer(object):
     """Base layer class. Defines basic API for all layer objects.
@@ -103,8 +112,10 @@ class Layer(object):
         for var in self.vars:
             tf.compat.v1.summary.histogram(self.name + '/vars/' + var, self.vars[var])
 
+
 class GraphConvolution(Layer):
     """Graph convolution layer."""
+
     def __init__(self, input_dim, output_dim, placeholders, dropout=0.,
                  sparse_inputs=False, act=tf.nn.relu, bias=False,
                  featureless=False, **kwargs):

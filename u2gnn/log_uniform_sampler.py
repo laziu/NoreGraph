@@ -1,12 +1,12 @@
 import numpy as np
 
-""" Python version of LogUniformSampler is taken from:
-    https://github.com/leimao/Sampled-Softmax-PyTorch/blob/master/utils.py
-"""
 
-class LogUniformSampler(object):
+class LogUniformSampler:
+    """ Python version of LogUniformSampler is taken from:
+        https://github.com/leimao/Sampled-Softmax-PyTorch/blob/master/utils.py
+    """
+
     def __init__(self, ntokens):
-
         self.N = ntokens
         self.prob = [0] * self.N
 

@@ -47,14 +47,15 @@ graphs, num_classes, label_map, _, graph_name_map = load_cached_data(args.datase
 
 weird = [graph.centrality_weirdness for graph in graphs]
 size = [len(graph.g) for graph in graphs]
-weird = torch.Tensor(weird).reshape(-1, 1) # batch size
-size  = torch.Tensor(size ).reshape(-1, 1) # batch size
-additional_info = torch.cat((weird, size), dim = 1)
+weird = torch.Tensor(weird).reshape(-1, 1)  # batch size
+size = torch.Tensor(size).reshape(-1, 1)  # batch size
+additional_info = torch.cat((weird, size), dim=1)
 
 feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
 print(feature_dim_size)
 if "REDDIT" in args.dataset:
     feature_dim_size = 4
+
 
 def get_Adj_matrix(batch_graph):
     edge_mat_list = []
@@ -66,10 +67,11 @@ def get_Adj_matrix(batch_graph):
     Adj_block_idx = np.concatenate(edge_mat_list, 1)
     # Adj_block_elem = np.ones(Adj_block_idx.shape[1])
 
-    Adj_block_idx_row = Adj_block_idx[0,:]
-    Adj_block_idx_cl = Adj_block_idx[1,:]
+    Adj_block_idx_row = Adj_block_idx[0, :]
+    Adj_block_idx_cl = Adj_block_idx[1, :]
 
     return Adj_block_idx_row, Adj_block_idx_cl
+
 
 def get_graphpool(batch_graph):
     start_idx = [0]
@@ -89,13 +91,14 @@ def get_graphpool(batch_graph):
 
     return graph_pool
 
+
 def get_batch_data(selected_idx):
     batch_graph = [graphs[idx] for idx in selected_idx]
     c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
     c_concat = torch.from_numpy(c_concat).to(torch.float32)
     X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
     if "REDDIT" in args.dataset:
-        X_concat = np.tile(X_concat, feature_dim_size) #[1,1,1,1]
+        X_concat = np.tile(X_concat, feature_dim_size)  # [1,1,1,1]
         X_concat = X_concat * 0.01
     X_concat = torch.from_numpy(X_concat)
     # graph-level sum pooling
@@ -122,34 +125,40 @@ def get_batch_data(selected_idx):
 
     return selected_idx, input_x, X_concat, graph_labels, c_concat
 
+
 class IndexDataset(Dataset):
     def __init__(self, idx):
         super().__init__()
         self.idx = idx
+
     def __len__(self): return len(self.idx)
     def __getitem__(self, i): return self.idx[i]
+
 
 trainidxset = IndexDataset([i for i, graph in enumerate(graphs) if graph.label is not None])
 trainloader = DataLoader(trainidxset, batch_size=args.batch_size, shuffle=True,  collate_fn=get_batch_data, pin_memory=True)
 
 print("Loading data... finished!")
 
-model = TransformerU2GNN(feature_dim_size=feature_dim_size, ff_hidden_size=args.ff_hidden_size,
-                        num_classes=num_classes, dropout=args.dropout,
-                        num_self_att_layers=args.num_timesteps,
-                        num_U2GNN_layers=args.num_hidden_layers).to(device)
+model = SupU2GNN(feature_dim_size=feature_dim_size, ff_hidden_size=args.ff_hidden_size,
+                 num_classes=num_classes, dropout=args.dropout,
+                 num_self_att_layers=args.num_timesteps,
+                 num_U2GNN_layers=args.num_hidden_layers).to(device)
 
-def cross_entropy(pred, soft_targets): # use nn.CrossEntropyLoss if not using soft labels in Line 159
+
+def cross_entropy(pred, soft_targets):  # use nn.CrossEntropyLoss if not using soft labels in Line 159
     logsoftmax = nn.LogSoftmax(dim=1)
     return torch.mean(torch.sum(- soft_targets * logsoftmax(pred), 1))
+
 
 # criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 num_batches_per_epoch = int((len(graphs) - 1) / args.batch_size) + 1
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_batches_per_epoch, gamma=0.1)
 
+
 def train():
-    model.train() # Turn on the train mode
+    model.train()  # Turn on the train mode
     total_loss = 0.
     total_correct = 0
     for selected_idx, input_x, X_concat, graph_labels, c_concat in tqdm(trainloader, desc='train'):
@@ -164,7 +173,7 @@ def train():
         # loss = criterion(prediction_scores, graph_labels)
         loss = cross_entropy(prediction_scores, smoothed_labels)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5) # prevent the exploding gradient problem
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)  # prevent the exploding gradient problem
         optimizer.step()
         total_loss += loss.item()
 
@@ -173,6 +182,7 @@ def train():
 
     acc_test = total_correct / float(len(trainidxset))
     return total_loss, acc_test
+
 
 def inspect():
     model.eval()
@@ -189,7 +199,8 @@ def inspect():
         idx = np.array(idx)
         for i in range(0, len(idx), args.batch_size):
             selected_idx = idx[i:i + args.batch_size]
-            if len(selected_idx) == 0: continue
+            if len(selected_idx) == 0:
+                continue
             selected_idx, input_x, X_concat, _, c_concat = get_batch_data(selected_idx)
             graph_pool = get_graphpool([graphs[idx] for idx in selected_idx])
             prediction_scores = model(input_x.to(device), graph_pool.to(device), X_concat.to(device), c_concat.to(device)).detach()
@@ -222,7 +233,7 @@ if not args.only_test:
         train_loss, acc_test = train()
         cost_loss.append(train_loss)
         print('| epoch {:3d} | time: {:5.2f}s | loss {:5.2f} | test acc {:5.2f} | '.format(
-                    epoch, (time.time() - epoch_start_time), train_loss, acc_test*100))
+            epoch, (time.time() - epoch_start_time), train_loss, acc_test*100))
 
         if epoch > 5 and cost_loss[-1] > np.mean(cost_loss[-6:-1]):
             scheduler.step()

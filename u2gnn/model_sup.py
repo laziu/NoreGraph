@@ -4,15 +4,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
-class TransformerU2GNN(nn.Module):
 
+class SupU2GNN(nn.Module):
     def __init__(self, feature_dim_size, ff_hidden_size, num_classes,
                  num_self_att_layers, dropout, num_U2GNN_layers):
-        super(TransformerU2GNN, self).__init__()
+        super(SupU2GNN, self).__init__()
+
         self.feature_dim_size = feature_dim_size
         self.ff_hidden_size = ff_hidden_size
         self.num_classes = num_classes
-        self.num_self_att_layers = num_self_att_layers #Each U2GNN layer consists of a number of self-attention layers
+        self.num_self_att_layers = num_self_att_layers  # Each U2GNN layer consists of a number of self-attention layers
         self.num_U2GNN_layers = num_U2GNN_layers
         #
         self.u2gnn_layers = torch.nn.ModuleList()
@@ -37,15 +38,16 @@ class TransformerU2GNN(nn.Module):
             output_Tr = self.u2gnn_layers[layer_idx](input_Tr)
             output_Tr = torch.split(output_Tr, split_size_or_sections=1, dim=1)[0]
             output_Tr = torch.squeeze(output_Tr, dim=1)
-            #new input for next layer
+            # new input for next layer
             input_Tr = F.embedding(input_x, output_Tr)
-            #sum pooling
+            # sum pooling
             graph_embeddings = torch.spmm(graph_pool, output_Tr)
             graph_embeddings = self.dropouts[layer_idx](graph_embeddings)
             # Produce the final scores
             prediction_scores += self.predictions[layer_idx](graph_embeddings)
 
         return prediction_scores
+
 
 def label_smoothing(true_labels: torch.Tensor, classes: int, smoothing=0.1):
     """

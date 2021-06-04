@@ -51,15 +51,16 @@ graphs, _, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
 weird = [graph.centrality_weirdness for graph in graphs]
 size = [len(graph.g) for graph in graphs]
-weird = torch.Tensor(weird).reshape(-1, 1) # batch size
-size  = torch.Tensor(size ).reshape(-1, 1) # batch size
-additional_info = torch.cat((weird, size), dim = 1)
+weird = torch.Tensor(weird).reshape(-1, 1)  # batch size
+size = torch.Tensor(size).reshape(-1, 1)  # batch size
+additional_info = torch.cat((weird, size), dim=1)
 
 graph_labels = np.array([graph.label for graph in graphs])
 feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
 print(feature_dim_size)
 if "REDDIT" in args.dataset:
     feature_dim_size = 4
+
 
 def get_Adj_matrix(batch_graph):
     edge_mat_list = []
@@ -71,10 +72,11 @@ def get_Adj_matrix(batch_graph):
     Adj_block_idx = np.concatenate(edge_mat_list, 1)
     # Adj_block_elem = np.ones(Adj_block_idx.shape[1])
 
-    Adj_block_idx_row = Adj_block_idx[0,:]
-    Adj_block_idx_cl = Adj_block_idx[1,:]
+    Adj_block_idx_row = Adj_block_idx[0, :]
+    Adj_block_idx_cl = Adj_block_idx[1, :]
 
     return Adj_block_idx_row, Adj_block_idx_cl
+
 
 def get_graphpool(batch_graph):
     start_idx = [0]
@@ -93,24 +95,28 @@ def get_graphpool(batch_graph):
     graph_pool = torch.sparse.FloatTensor(idx, elem, torch.Size([len(batch_graph), start_idx[-1]]))
 
     return graph_pool
+
+
 #
 graph_pool = get_graphpool(graphs)
 graph_indices = graph_pool._indices()[0]
-vocab_size=graph_pool.size()[1]
+vocab_size = graph_pool.size()[1]
+
 
 def get_idx_nodes(selected_graph_idx):
-    idx_nodes = [torch.where(graph_indices==i)[0] for i in selected_graph_idx]
+    idx_nodes = [torch.where(graph_indices == i)[0] for i in selected_graph_idx]
     idx_nodes = torch.cat(idx_nodes)
     return idx_nodes
+
 
 def get_batch_data(selected_idx):
     batch_graph = [graphs[idx] for idx in selected_idx]
     c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
     c_concat = torch.from_numpy(c_concat).to(torch.float32)
-    #print('c_concat',c_concat.shape)
+    # print('c_concat',c_concat.shape)
     X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
     if "REDDIT" in args.dataset:
-        X_concat = np.tile(X_concat, feature_dim_size) #[1,1,1,1]
+        X_concat = np.tile(X_concat, feature_dim_size)  # [1,1,1,1]
         X_concat = X_concat * 0.01
     X_concat = torch.from_numpy(X_concat)
 
@@ -134,25 +140,28 @@ def get_batch_data(selected_idx):
 
     return X_concat, input_x, input_y, c_concat
 
+
 class IndexDataset(Dataset):
     def __len__(self): return len(graphs)
     def __getitem__(self, i): return i
+
 
 dataloader = DataLoader(IndexDataset(), batch_size=args.batch_size, shuffle=True, collate_fn=get_batch_data, pin_memory=True)
 
 print("Loading data... finished!")
 
-model = TransformerU2GNN(feature_dim_size=feature_dim_size, ff_hidden_size=args.ff_hidden_size,
-                        dropout=args.dropout, num_self_att_layers=args.num_timesteps,
-                        vocab_size=vocab_size, sampled_num=args.sampled_num,
-                        num_U2GNN_layers=args.num_hidden_layers, device=device).to(device)
+model = UnsupU2GNN(feature_dim_size=feature_dim_size, ff_hidden_size=args.ff_hidden_size,
+                   dropout=args.dropout, num_self_att_layers=args.num_timesteps,
+                   vocab_size=vocab_size, sampled_num=args.sampled_num,
+                   num_U2GNN_layers=args.num_hidden_layers, device=device).to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 num_batches_per_epoch = int((len(graphs) - 1) / args.batch_size) + 1
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=num_batches_per_epoch, gamma=0.1)
 
+
 def train():
-    model.train() # Turn on the train mode
+    model.train()  # Turn on the train mode
     total_loss = 0.
     for X_concat, input_x, input_y, c_concat in tqdm(dataloader, desc='train'):
         optimizer.zero_grad()
@@ -165,8 +174,9 @@ def train():
 
     return total_loss
 
+
 def evaluate():
-    model.eval() # Turn on the evaluation mode
+    model.eval()  # Turn on the evaluation mode
     with torch.no_grad():
         # evaluating
         node_embeddings = model.ss.weight
@@ -241,7 +251,7 @@ if not args.only_test:
         cost_loss.append(train_loss)
         mean_10folds, std_10folds = evaluate()
         print('| epoch {:3d} | time: {:5.2f}s | loss {:5.2f} | mean {:5.2f} | std {:5.2f} | '.format(
-                    epoch, (time.time() - epoch_start_time), train_loss, mean_10folds*100, std_10folds*100))
+            epoch, (time.time() - epoch_start_time), train_loss, mean_10folds*100, std_10folds*100))
 
         if epoch > 5 and cost_loss[-1] > np.mean(cost_loss[-6:-1]):
             scheduler.step()

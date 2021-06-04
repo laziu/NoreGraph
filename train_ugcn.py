@@ -1,20 +1,19 @@
 #! /usr/bin/env python
+from tqdm import tqdm
+from sklearn.linear_model import LogisticRegression
+import statistics
+from util import *
+from scipy.sparse import coo_matrix
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import pickle
+from ugcn.model import GCN_graph_cls
+import datetime
+import time
+import numpy as np
+import tensorflow as tf
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
-import tensorflow as tf
-import numpy as np
-
-import time
-import datetime
-from ugcn.model import GCN_graph_cls
-import pickle
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from scipy.sparse import coo_matrix
-from util import *
-import statistics
-from sklearn.linear_model import LogisticRegression
-from tqdm import tqdm
 
 # Parameters
 # ==================================================
@@ -45,14 +44,15 @@ graphs, _, label_map, _, graph_name_map = load_cached_data(args.dataset)
 
 weird = [graph.centrality_weirdness for graph in graphs]
 size = [len(graph.g) for graph in graphs]
-weird = np.array(weird).reshape(-1, 1) # batch size
-size  = np.array(size ).reshape(-1, 1) # batch size
+weird = np.array(weird).reshape(-1, 1)  # batch size
+size = np.array(size).reshape(-1, 1)  # batch size
 additional_info = np.concatenate((weird, size), 1)
 
 feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
 graph_labels = np.array([graph.label for graph in graphs])
 if "REDDIT" in args.dataset:
     feature_dim_size = 4
+
 
 def get_Adj_matrix(batch_graph):
     edge_mat_list = []
@@ -64,7 +64,7 @@ def get_Adj_matrix(batch_graph):
     Adj_block_idx = np.concatenate(edge_mat_list, 1)
     Adj_block_elem = np.ones(Adj_block_idx.shape[1])
 
-    #self-loop
+    # self-loop
     num_node = start_idx[-1]
     self_loop_edge = np.array([range(num_node), range(num_node)])
     elem = np.ones(num_node)
@@ -74,6 +74,7 @@ def get_Adj_matrix(batch_graph):
     Adj_block = coo_matrix((Adj_block_elem, Adj_block_idx), shape=(num_node, num_node))
 
     return Adj_block
+
 
 def get_graphpool(batch_graph):
     start_idx = [0]
@@ -93,18 +94,21 @@ def get_graphpool(batch_graph):
     graph_pool = coo_matrix((elem, (idx[:, 0], idx[:, 1])), shape=(len(batch_graph), start_idx[-1]))
     return graph_pool
 
+
 graph_pool = get_graphpool(graphs)
+
 
 def get_idx_nodes(selected_graph_idx):
     idx_nodes = [np.where(graph_pool.getrow(i).toarray()[0] == 1)[0] for i in selected_graph_idx]
     idx_nodes = np.reshape(np.concatenate(idx_nodes), (-1, 1))
     return idx_nodes
 
+
 def get_batch_data(batch_graph):
     # features
     X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
     if "REDDIT" in args.dataset:
-        X_concat = np.tile(X_concat, feature_dim_size) #[1,1,1,1]
+        X_concat = np.tile(X_concat, feature_dim_size)  # [1,1,1,1]
         X_concat = X_concat * 0.01
     c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
     X_concat = np.concatenate((X_concat, c_concat), axis=1)
@@ -118,7 +122,10 @@ def get_batch_data(batch_graph):
     num_features_nonzero = X_concat[1].shape
     return Adj_block, X_concat, num_features_nonzero
 
+
 batch_total_length = int(np.ceil(len(graphs) / args.batch_size))
+
+
 def batch_loader():
     permuted_idx = np.random.permutation(len(graphs))
     for i in range(batch_total_length):
@@ -131,6 +138,7 @@ def batch_loader():
         idx_nodes = get_idx_nodes(selected_idx)
         yield Adj_block, X_concat, num_features_nonzero, idx_nodes
 
+
 print("Loading data... finished!")
 # Training
 # ==================================================
@@ -141,11 +149,11 @@ with tf.Graph().as_default():
         sess.as_default()
         global_step = tf.Variable(0, name="global_step", trainable=False)
         unsup_gcn = GCN_graph_cls(feature_dim_size=feature_dim_size,
-                      hidden_size=args.hidden_size,
-                      num_GNN_layers=args.num_GNN_layers,
-                      vocab_size=graph_pool.shape[1],
-                      num_sampled=args.num_sampled,
-                      )
+                                  hidden_size=args.hidden_size,
+                                  num_GNN_layers=args.num_GNN_layers,
+                                  vocab_size=graph_pool.shape[1],
+                                  num_sampled=args.num_sampled,
+                                  )
 
         # Define Training procedure
         optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=args.learning_rate)
@@ -176,7 +184,7 @@ with tf.Graph().as_default():
                 unsup_gcn.X_concat: X_concat,
                 unsup_gcn.num_features_nonzero: num_features_nonzero,
                 unsup_gcn.dropout: args.dropout,
-                unsup_gcn.input_y:idx_nodes
+                unsup_gcn.input_y: idx_nodes
             }
             _, step, loss = sess.run([train_op, global_step, unsup_gcn.total_loss], feed_dict)
             return loss
@@ -199,7 +207,7 @@ with tf.Graph().as_default():
             graph_embeddings = graph_pool.dot(node_embeddings)
             graph_embeddings = np.concatenate((graph_embeddings, additional_info), 1)
             print(graph_embeddings.shape)
-            
+
             # evaluate
             acc_10folds = []
             rand_seed = np.random.randint(0xFFFF)
