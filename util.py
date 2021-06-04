@@ -10,7 +10,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from multiprocessing import cpu_count
 
-project_root = Path(__file__).parents[2].absolute()
+project_root = Path(__file__).parent.absolute()
 current_root = Path(__file__).parent.absolute()
 
 """Adapted from https://github.com/weihua916/powerful-gnns/blob/master/util.py"""

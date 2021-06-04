@@ -7,7 +7,7 @@ import numpy as np
 
 import time
 import datetime
-from model_unsup_gcn import GCN_graph_cls
+from ugcn.model import GCN_graph_cls
 import pickle
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from scipy.sparse import coo_matrix

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
-from sampled_softmax import  *
+from .sampled_softmax import  *
 
 class TransformerU2GNN(nn.Module):
 

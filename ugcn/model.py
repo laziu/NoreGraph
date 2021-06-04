@@ -1,5 +1,5 @@
 import tensorflow as tf
-from gcn_layer import *
+from .layer import *
 
 class GCN_graph_cls(object):
     def __init__(self, feature_dim_size, hidden_size, num_GNN_layers, num_sampled, vocab_size):
