@@ -1,252 +1,247 @@
 #! /usr/bin/env python
+from time import time
+import json
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from tqdm import tqdm
+import pandas as pd
+
+import math
+import numpy as np
+from scipy.sparse import coo_matrix
 from sklearn.linear_model import LogisticRegression
 import statistics
-from util import *
-from scipy.sparse import coo_matrix
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-import pickle
-from ugcn.model import GCN_graph_cls
-import datetime
-import time
-import numpy as np
+
 import tensorflow as tf
+
+from ugcn.model import *
+from util import *
+
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
+if __name__ == "__main__":
+    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--model_name", default="KAGGLE", help="Output directory name")
+    parser.add_argument("--learning_rate", default=0.0001, type=float, help="Learning rate")
+    parser.add_argument("--batch_size", default=128, type=int, help="Batch size")
+    parser.add_argument("--num_epochs", default=50, type=int, help="Number of training epochs")
+    parser.add_argument("--num_sampled", default=256, type=int, help="Sampled softmax length to embedding")
+    parser.add_argument("--hidden_size", default=128, type=int, help="The hidden layer size")
+    parser.add_argument("--num_conv_layers", default=2, type=int, help="Number of stacked graph convolution layers")
+    parser.add_argument("--dropout", default=0.5, type=float, help="Dropout rate")
+    parser.add_argument("--no_soft_placement", action='store_true', help="Disallow device soft device placement")
+    parser.add_argument("--log_device_placement", action='store_true', help="Log placement of ops on devices")
+    parser.add_argument("--load_epoch", default=0, type=int, help="Load previous state if set")
+    parser.add_argument("--test_only", action='store_true', help="Print test result and exit")
+    args = parser.parse_args()
+    print(args)
 
-# Parameters
-# ==================================================
+    print("Loading data...")
+    graphs: "list[S2VGraph]"
+    label_map: "dict[int, int]"
+    graph_pos: "dict[int, int]"
+    graphs, label_map, graph_pos = load_cached_data()
+    print("Loading data finished.")
 
-parser = ArgumentParser("GCN_Unsup", formatter_class=ArgumentDefaultsHelpFormatter, conflict_handler='resolve')
+    graph_labels = np.array([graph.label for graph in graphs])
+    graph_features = np.array([graph.graph_features for graph in graphs])
+    feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].node_centrality.shape[1]
+    num_classes = len(label_map)
+    print(f"node features dimension: {feature_dim_size}")
 
-parser.add_argument("--run_folder", default="../", help="")
-parser.add_argument("--dataset", default="MUTAG", help="Name of the dataset.")
-parser.add_argument("--learning_rate", default=0.0005, type=float, help="Learning rate")
-parser.add_argument("--batch_size", default=2, type=int, help="Batch Size")
-parser.add_argument("--num_epochs", default=50, type=int, help="Number of training epochs")
-parser.add_argument("--saveStep", default=1, type=int, help="")
-parser.add_argument("--allow_soft_placement", default=True, type=bool, help="Allow device soft device placement")
-parser.add_argument("--log_device_placement", default=False, type=bool, help="Log placement of ops on devices")
-parser.add_argument("--model_name", default='MUTAG', help="")
-parser.add_argument("--dropout", default=0.5, type=float, help="Dropout")
-parser.add_argument("--num_GNN_layers", default=2, type=int, help="Number of stacked layers")
-parser.add_argument("--hidden_size", default=64, type=int, help="size of hidden layers")
-parser.add_argument('--num_sampled', default=512, type=int, help='')
-parser.add_argument('--load_state', default=False, type=bool, help='Load saved model variables.')
-args = parser.parse_args()
+    def get_graphpool(batch_graph):
+        start_idx = [0]
+        # compute the padded neighbor list
+        for i, graph in enumerate(batch_graph):
+            start_idx.append(start_idx[i] + len(graph.g))
 
-print(args)
+        idx = []
+        elem = []
+        for i, graph in enumerate(batch_graph):
+            elem.extend([1] * len(graph.g))
+            idx.extend([[i, j] for j in range(start_idx[i], start_idx[i + 1], 1)])
 
-# Load data
-print("Loading data...")
-graphs, _, label_map, _, graph_name_map = load_cached_data(args.dataset)
+        elem = np.array(elem)
+        idx = np.array(idx)
 
-weird = [graph.centrality_weirdness for graph in graphs]
-size = [len(graph.g) for graph in graphs]
-weird = np.array(weird).reshape(-1, 1)  # batch size
-size = np.array(size).reshape(-1, 1)  # batch size
-additional_info = np.concatenate((weird, size), 1)
+        graph_pool = coo_matrix((elem, (idx[:, 0], idx[:, 1])), shape=(len(batch_graph), start_idx[-1]))
+        return graph_pool
 
-feature_dim_size = graphs[0].node_features.shape[1] + graphs[0].centrality.shape[1]
-graph_labels = np.array([graph.label for graph in graphs])
-if "REDDIT" in args.dataset:
-    feature_dim_size = 4
+    graph_pool = get_graphpool(graphs)
+    vocab_size = graph_pool.shape[1]
 
-
-def get_Adj_matrix(batch_graph):
-    edge_mat_list = []
-    start_idx = [0]
-    for i, graph in enumerate(batch_graph):
-        start_idx.append(start_idx[i] + len(graph.g))
-        edge_mat_list.append(graph.edge_mat + start_idx[i])
-
-    Adj_block_idx = np.concatenate(edge_mat_list, 1)
-    Adj_block_elem = np.ones(Adj_block_idx.shape[1])
-
-    # self-loop
-    num_node = start_idx[-1]
-    self_loop_edge = np.array([range(num_node), range(num_node)])
-    elem = np.ones(num_node)
-    Adj_block_idx = np.concatenate([Adj_block_idx, self_loop_edge], 1)
-    Adj_block_elem = np.concatenate([Adj_block_elem, elem], 0)
-
-    Adj_block = coo_matrix((Adj_block_elem, Adj_block_idx), shape=(num_node, num_node))
-
-    return Adj_block
-
-
-def get_graphpool(batch_graph):
-    start_idx = [0]
-    # compute the padded neighbor list
-    for i, graph in enumerate(batch_graph):
-        start_idx.append(start_idx[i] + len(graph.g))
-
-    idx = []
-    elem = []
-    for i, graph in enumerate(batch_graph):
-        elem.extend([1] * len(graph.g))
-        idx.extend([[i, j] for j in range(start_idx[i], start_idx[i + 1], 1)])
-
-    elem = np.array(elem)
-    idx = np.array(idx)
-
-    graph_pool = coo_matrix((elem, (idx[:, 0], idx[:, 1])), shape=(len(batch_graph), start_idx[-1]))
-    return graph_pool
-
-
-graph_pool = get_graphpool(graphs)
-
-
-def get_idx_nodes(selected_graph_idx):
-    idx_nodes = [np.where(graph_pool.getrow(i).toarray()[0] == 1)[0] for i in selected_graph_idx]
-    idx_nodes = np.reshape(np.concatenate(idx_nodes), (-1, 1))
-    return idx_nodes
-
-
-def get_batch_data(batch_graph):
-    # features
-    X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
-    if "REDDIT" in args.dataset:
-        X_concat = np.tile(X_concat, feature_dim_size)  # [1,1,1,1]
-        X_concat = X_concat * 0.01
-    c_concat = np.concatenate([graph.centrality for graph in batch_graph], 0)
-    X_concat = np.concatenate((X_concat, c_concat), axis=1)
-
-    X_concat = coo_matrix(X_concat)
-    X_concat = sparse_to_tuple(X_concat)
-    # adj
-    Adj_block = get_Adj_matrix(batch_graph)
-    Adj_block = sparse_to_tuple(Adj_block)
-
-    num_features_nonzero = X_concat[1].shape
-    return Adj_block, X_concat, num_features_nonzero
-
-
-batch_total_length = int(np.ceil(len(graphs) / args.batch_size))
-
-
-def batch_loader():
-    permuted_idx = np.random.permutation(len(graphs))
-    for i in range(batch_total_length):
-        start = i * args.batch_size
-        end = min((i+1) * args.batch_size, len(graphs))
-        selected_idx = permuted_idx[start:end]
-
+    def get_batch_data(selected_idx):
         batch_graph = [graphs[idx] for idx in selected_idx]
-        Adj_block, X_concat, num_features_nonzero = get_batch_data(batch_graph)
-        idx_nodes = get_idx_nodes(selected_idx)
-        yield Adj_block, X_concat, num_features_nonzero, idx_nodes
+        c_concat = np.concatenate([graph.node_centrality for graph in batch_graph], 0)
+        X_concat = np.concatenate([graph.node_features for graph in batch_graph], 0)
+        X_concat = np.concatenate((X_concat, c_concat), axis=1)
 
+        X_concat = coo_matrix(X_concat)
+        X_concat = sparse_to_tuple(X_concat)
 
-print("Loading data... finished!")
-# Training
-# ==================================================
-with tf.Graph().as_default():
-    session_conf = tf.compat.v1.ConfigProto(allow_soft_placement=args.allow_soft_placement, log_device_placement=args.log_device_placement)
-    session_conf.gpu_options.allow_growth = True
-    with tf.compat.v1.Session(config=session_conf) as sess:
-        sess.as_default()
-        global_step = tf.Variable(0, name="global_step", trainable=False)
-        unsup_gcn = GCN_graph_cls(feature_dim_size=feature_dim_size,
-                                  hidden_size=args.hidden_size,
-                                  num_GNN_layers=args.num_GNN_layers,
-                                  vocab_size=graph_pool.shape[1],
-                                  num_sampled=args.num_sampled,
-                                  )
+        edge_mat_list = []
+        start_idx = [0]
+        for i, graph in enumerate(batch_graph):
+            start_idx.append(start_idx[i] + len(graph.g))
+            edge_mat_list.append(graph.edge_mat + start_idx[i])
 
-        # Define Training procedure
-        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=args.learning_rate)
-        grads_and_vars = optimizer.compute_gradients(unsup_gcn.total_loss)
-        train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
+        Adj_block_idx = np.concatenate(edge_mat_list, 1)
+        Adj_block_elem = np.ones(Adj_block_idx.shape[1])
 
-        out_dir: Path = project_root/"runs_GCN_UnSup"/args.model_name
-        out_dir.mkdir(exist_ok=True, parents=True)
-        print("Writing to {}\n".format(out_dir))
+        # self-loop
+        num_node = start_idx[-1]
+        self_loop_edge = np.array([range(num_node), range(num_node)])
+        elem = np.ones(num_node)
+        Adj_block_idx = np.concatenate([Adj_block_idx, self_loop_edge], 1)
+        Adj_block_elem = np.concatenate([Adj_block_elem, elem], 0)
 
-        # Checkpoint directory. Tensorflow assumes this directory already exists so we need to create it
-        checkpoint_dir = out_dir/"checkpoints"
-        checkpoint_dir.mkdir(exist_ok=True, parents=True)
+        Adj_block = coo_matrix((Adj_block_elem, Adj_block_idx), shape=(num_node, num_node))
+        Adj_block = sparse_to_tuple(Adj_block)
 
-        # Initialize all variables
-        sess.run(tf.compat.v1.global_variables_initializer())
-        graph = tf.compat.v1.get_default_graph()
+        input_y = [np.where(graph_pool.getrow(i).toarray()[0] == 1)[0] for i in selected_idx]
+        input_y = np.reshape(np.concatenate(input_y), (-1, 1))
 
-        saver = tf.compat.v1.train.Saver()
-        ckpt_path = str(out_dir/"model")
-        ckpt = tf.compat.v1.train.get_checkpoint_state(ckpt_path)
-        if ckpt and ckpt.model_checkpoint_path:
-            saver.restore(sess, ckpt.model_checkpoint_path)
+        return X_concat, Adj_block, input_y
 
-        def train_step(Adj_block, X_concat, num_features_nonzero, idx_nodes):
-            feed_dict = {
-                unsup_gcn.Adj_block: Adj_block,
-                unsup_gcn.X_concat: X_concat,
-                unsup_gcn.num_features_nonzero: num_features_nonzero,
-                unsup_gcn.dropout: args.dropout,
-                unsup_gcn.input_y: idx_nodes
-            }
-            _, step, loss = sess.run([train_op, global_step, unsup_gcn.total_loss], feed_dict)
-            return loss
+    def get_graph_embeddings(node_embeddings):
+        graph_embeddings = graph_pool.dot(node_embeddings)
+        graph_embeddings = np.concatenate((graph_embeddings, graph_features), 1)
+        return graph_embeddings
 
-        write_acc = open(checkpoint_dir/'model_acc.txt', 'w')
-        max_acc = 0.0
-        idx_epoch = 0
-        num_batches_per_epoch = int((len(graphs) - 1) / args.batch_size) + 1
-        for epoch in range(1, args.num_epochs+1):
-            # train
-            loss = 0
-            for Adj_block, X_concat, num_features_nonzero, idx_nodes in tqdm(batch_loader(), total=batch_total_length):
-                loss += train_step(Adj_block, X_concat, num_features_nonzero, idx_nodes)
-                # current_step = tf.compat.v1.train.global_step(sess, global_step)
-            saver.save(sess, ckpt_path)
-            print(loss)
-            # It will give tensor object
-            node_embeddings = graph.get_tensor_by_name('embedding/node_embeddings:0')
-            node_embeddings = sess.run(node_embeddings)
-            graph_embeddings = graph_pool.dot(node_embeddings)
-            graph_embeddings = np.concatenate((graph_embeddings, additional_info), 1)
-            print(graph_embeddings.shape)
+    train_all_idx, _ = train_idx(graphs, labeled_only=False)
+    train_intr_idx, _ = train_idx(graphs, labeled_only=True)
+    test_intr_idx, test_real_idx = test_idx(graph_pos)
 
-            # evaluate
-            acc_10folds = []
-            rand_seed = np.random.randint(0xFFFF)
-            for fold_idx in range(10):
-                train_idx, test_idx = separate_data_idx(graphs, fold_idx, rand_seed)
-                train_graph_embeddings = graph_embeddings[train_idx]
-                test_graph_embeddings = graph_embeddings[test_idx]
-                train_labels = graph_labels[train_idx].astype(int)
-                test_labels = graph_labels[test_idx].astype(int)
+    with tf.Graph().as_default():
+        tf_sess_conf = tf.compat.v1.ConfigProto(allow_soft_placement=(not args.no_soft_placement),
+                                                log_device_placement=args.log_device_placement)
+        tf_sess_conf.gpu_options.allow_growth = True
+        with tf.compat.v1.Session(config=tf_sess_conf) as tf_sess:
+            tf_sess.as_default()
 
-                cls = LogisticRegression(solver='liblinear', tol=0.001, multi_class='auto')
-                cls.fit(train_graph_embeddings, train_labels)
-                ACC = cls.score(test_graph_embeddings, test_labels)
-                acc_10folds.append(ACC)
+            global_step = tf.Variable(0, name="global_step", trainable=False)
 
-            mean_10folds = statistics.mean(acc_10folds)
-            std_10folds = statistics.stdev(acc_10folds)
-            print(f'epoch {epoch} acc [ {"  ".join([f"{acc*100:6.3f}%" for acc in acc_10folds])} ]')
-            print('epoch ', epoch, ' mean: ', str(mean_10folds*100), ' std: ', str(std_10folds*100))
+            model = UnsupGCN(feature_dim_size=feature_dim_size, hidden_size=args.hidden_size,
+                             num_conv_layers=args.num_conv_layers,
+                             vocab_size=vocab_size, num_sampled=args.num_sampled)
 
-            write_acc.write('epoch ' + str(epoch) + ' mean: ' + str(mean_10folds*100) + ' std: ' + str(std_10folds*100) + '\n')
+            # Define Training procedure
+            optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=args.learning_rate)
+            gradients = optimizer.compute_gradients(model.total_loss)
+            optimizer = optimizer.apply_gradients(gradients, global_step=global_step)
 
-            # inspect
-            train_idx = [idx for idx, graph in enumerate(graphs) if graph.label is not None]
-            train_graph_embeddings = graph_embeddings[train_idx]
-            train_labels = graph_labels[train_idx].astype(int)
+            # Initialize all variables
+            tf_sess.run(tf.compat.v1.global_variables_initializer())
+            tf_graph = tf.compat.v1.get_default_graph()
 
-            cls = LogisticRegression(solver='liblinear', tol=0.001, multi_class='auto')
-            cls.fit(train_graph_embeddings, train_labels)
+            def train():
+                total_loss = 0.
+                for selected_idx in tqdm(batch(shuffle(train_all_idx), batch_size=args.batch_size), desc="train"):
+                    X_concat, Adj_block, input_y = get_batch_data(selected_idx)
+                    feed_dict = {
+                        model.Adj_block: Adj_block,
+                        model.X_concat: X_concat,
+                        model.num_features_nonzero: X_concat[1].shape,
+                        model.dropout: args.dropout,
+                        model.input_y: input_y
+                    }
+                    _, step, loss = tf_sess.run([optimizer, global_step, model.total_loss], feed_dict)
+                    total_loss += loss
+                return total_loss
 
-            with open(project_root/'data/test.txt', 'r') as fi, open(out_dir/'test_sample.csv', 'w') as fo:
-                fo.write('Id,Category\n')
-                for line in fi:
-                    test_idx = [int(w) for w in re.findall(r'\d+', line)][0]
-                    test_internal_idx = [graph_name_map[test_idx]]
-                    test_graph_embedding = graph_embeddings[test_internal_idx]
-                    test_label_estimated = cls.predict(test_graph_embedding).item()
-                    if test_label_estimated in label_map:
-                        test_label_estimated = label_map[test_label_estimated]
-                    fo.write(f'{test_idx},{test_label_estimated}\n')
+            def evaluate():
+                node_embeddings = tf_sess.run(tf_graph.get_tensor_by_name("embedding/node_embeddings:0"))
+                graph_embeddings = get_graph_embeddings(node_embeddings)
 
-        write_acc.close()
+                accuracy = []
+                for train_idx, test_idx in kfold_train_idx(graphs, n_splits=10, labeled_only=True):
+                    train_embed = graph_embeddings[train_idx]
+                    test_embed = graph_embeddings[test_idx]
+                    train_labels = graph_labels[train_idx].astype(int)
+                    test_labels = graph_labels[test_idx].astype(int)
+
+                    cls = LogisticRegression(solver="liblinear", tol=0.001, multi_class="auto")
+                    cls.fit(train_embed, train_labels)
+                    acc = cls.score(test_embed, test_labels)
+                    accuracy.append(acc)
+
+                print(f"Evaluate:   {'   '.join([f'{acc*100:5.2f}' for acc in accuracy])}")
+                return statistics.mean(accuracy), statistics.stdev(accuracy)
+
+            def test():
+                node_embeddings = tf_sess.run(tf_graph.get_tensor_by_name("embedding/node_embeddings:0"))
+                graph_embeddings = get_graph_embeddings(node_embeddings)
+
+                train_embed = graph_embeddings[train_intr_idx]
+                train_labels = graph_labels[train_intr_idx].astype(int)
+
+                cls = LogisticRegression(solver="liblinear", tol=0.001, multi_class="auto")
+                cls.fit(train_embed, train_labels)
+
+                test_embed = graph_embeddings[test_intr_idx]
+
+                test_labels_est = cls.predict(test_embed)
+                test_labels_est = [(label_map[l] if l in label_map else l) for l in test_labels_est]
+
+                test_acc = test_accuracy(test_real_idx, test_labels_est)
+                return test_acc, test_labels_est
+
+            """main process"""
+            out_dir: Path = project_root/"runs/uGCN"/args.model_name
+            out_dir.mkdir(exist_ok=True, parents=True)
+            print(f"Using {out_dir}")
+
+            global_args_key = ["num_sampled", "hidden_size", "num_conv_layers", "dropout"]
+            epoch_args_key = ["learning_rate", "batch_size"]
+            checkpoints_key = ["time", "train_acc", "train_acc_stdev", "train_loss", "test_acc"]
+
+            def filter_args(arg: dict, filter: list):
+                return {k: v for k, v in arg.items() if k in filter}
+
+            if (out_dir/"args.json").is_file():
+                with open(out_dir/"args.json", "r") as f:
+                    cargs = filter_args(vars(args), global_args_key)
+                    sargs = filter_args(json.load(f), global_args_key)
+                    if cargs != sargs:
+                        print('args mismatch!')
+                        print('current args:', cargs)
+                        print('saved args:', sargs)
+                        raise ValueError(f"runs/uGCN/{args.model_name}/args.json is not same with current args, delete it to dismiss.")
+            else:
+                with open(out_dir/"args.json", "w") as f:
+                    json.dump(filter_args(vars(args), global_args_key), f, indent=4)
+
+            checkpoints = pd.DataFrame(columns=[*epoch_args_key, *checkpoints_key])
+            checkpoints.index.name = "epoch"
+
+            tf_saver = tf.compat.v1.train.Saver()
+            if args.load_epoch > 0:
+                epoch_dir = out_dir/f"{args.load_epoch}"
+                tf_saver.restore(tf_sess, str(epoch_dir/"model"))
+                checkpoints = pd.concat([checkpoints, pd.read_csv(epoch_dir/"checkpoints.csv", index_col="epoch")])
+                test_acc, label_est = test()
+                print(f"state loaded from epoch {args.load_epoch} - test_acc: {test_acc*100:.2f}%")
+                if args.test_only:
+                    pd.DataFrame(data={"Id": test_real_idx, "Category": label_est}).to_csv(epoch_dir/"test_sample.csv", index=False)
+            elif args.test_only:
+                raise RuntimeError("args.test_only must be set with args.load_epoch")
+
+            if not args.test_only:
+                for epoch in range(args.load_epoch + 1, args.num_epochs + 1):
+                    start_time = time()
+                    train_loss = train()
+                    train_acc, train_acc_stdev = evaluate()
+                    time_spend = time() - start_time
+
+                    test_acc, label_est = test()
+
+                    print(f"| epoch {epoch:3d} | time: {time_spend:7.2f}s | train_acc: {train_acc*100:5.2f}% [stdev={train_acc_stdev*100:5.2f}] " +
+                          f"| train_loss: {train_loss:11.6f} | test_acc: {test_acc*100:5.2f}%")
+                    checkpoints.loc[epoch] = {**{k: v for k, v in zip(checkpoints_key, [time_spend, train_acc, train_acc_stdev, train_loss, test_acc])},
+                                              **filter_args(vars(args), epoch_args_key)}
+
+                    epoch_dir = out_dir/f"{epoch}"
+                    epoch_dir.mkdir(exist_ok=True)
+                    tf_saver.save(tf_sess, str(epoch_dir/"model"))
+                    checkpoints.to_csv(epoch_dir/"checkpoints.csv")
+                    pd.DataFrame(data={"Id": test_real_idx, "Category": label_est}).to_csv(epoch_dir/"test_sample.csv", index=False)

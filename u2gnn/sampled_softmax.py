@@ -15,9 +15,7 @@ class SampledSoftmax(nn.Module):
         self.ntokens = ntokens
         self.nsampled = nsampled
         self.device = device
-        #
         self.sampler = LogUniformSampler(self.ntokens)
-        #
         self.weight = nn.Parameter(torch.Tensor(ntokens, nhid))
         self.reset_parameters()
 

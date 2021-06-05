@@ -1,27 +1,14 @@
 #!/usr/bin/env python
-from pathlib import Path
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import re
-from argparse import ArgumentParser
+import pandas as pd
+from util import test_accuracy
 
-project_root = Path(__file__).parent.absolute()
+if __name__ == "__main__":
+    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument("filepath", help="Sample CSV to test")
+    args = parser.parse_args()
 
-parser = ArgumentParser()
-parser.add_argument("filepath")
-args = parser.parse_args()
-
-
-def collab_classifier(idx):
-    return 1 if idx <= 2600 else 2 if idx <= 3375 else 3
-
-
-total_count = 0
-succ_count = 0
-with open(project_root/args.filepath, 'r') as f:
-    for i, line in enumerate(f):
-        if i == 0:
-            continue
-        index, label = [int(w) for w in re.findall(r'\d+', line)]
-        total_count += 1
-        succ_count += (label == collab_classifier(index))
-
-print(succ_count/total_count)
+    input = pd.read_csv(args.filepath)
+    accuracy = test_accuracy(input['Id'], input['Category'])
+    print(accuracy)

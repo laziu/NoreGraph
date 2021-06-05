@@ -2,8 +2,8 @@ import tensorflow as tf
 from .layer import *
 
 
-class GCN_graph_cls(object):
-    def __init__(self, feature_dim_size, hidden_size, num_GNN_layers, num_sampled, vocab_size):
+class UnsupGCN(object):
+    def __init__(self, feature_dim_size, hidden_size, num_conv_layers, num_sampled, vocab_size):
         # Placeholders for input, output
         self.Adj_block = tf.compat.v1.sparse_placeholder(tf.float32, [None, None], name="Adj_block")
         self.X_concat = tf.compat.v1.sparse_placeholder(tf.float32, [None, feature_dim_size], name="X_concat")
@@ -21,7 +21,7 @@ class GCN_graph_cls(object):
         in_hidden_size = feature_dim_size
         self.output_vectors = []
         # Construct k GNN layers
-        for idx_layer in range(num_GNN_layers):
+        for idx_layer in range(num_conv_layers):
             sparse_inputs = False
             if idx_layer == 0:
                 sparse_inputs = True
@@ -42,7 +42,7 @@ class GCN_graph_cls(object):
         self.output_vectors = tf.nn.dropout(self.output_vectors, 1-self.dropout)
 
         with tf.name_scope("embedding"):
-            self.embedding_matrix = glorot([vocab_size, hidden_size*num_GNN_layers], name='node_embeddings')
+            self.embedding_matrix = glorot([vocab_size, hidden_size*num_conv_layers], name='node_embeddings')
             self.softmax_biases = tf.Variable(tf.zeros([vocab_size]))
 
         self.total_loss = tf.reduce_mean(

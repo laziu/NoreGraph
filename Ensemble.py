@@ -1,65 +1,23 @@
 #!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import pandas as pd
 
+if __name__ == "__main__":
+    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-i', dest='in_files', nargs='+', help='Multiple CSV to input.')
+    parser.add_argument('-o', dest='out_file', default='runs/test_sample_ensembled.csv', help='Output CSV path.')
+    args = parser.parse_args()
+    print(args)
 
-# In[14]:
+    inputs = [pd.read_csv(f) for f in args.in_files]
+    result = pd.DataFrame(columns=["Id", "Category"])
+    result.iloc[:, 0] = inputs[0].iloc[:, 0]
 
+    for i in range(len(inputs[0].iloc[:, 1])):
+        votes = {}
+        for input in inputs:
+            c = input.iloc[i, 1]
+            votes[c] = (votes[c] if c in votes else 0) + 1
+        result.iloc[i, 1] = max(votes, key=votes.get)
 
-test1 = pd.read_csv("test_sample_74.csv")
-test2 = pd.read_csv("test_sample_50epoch.csv")
-test3 = pd.read_csv("test_sample_100epoch.csv")
-result = pd.DataFrame(columns=["Id","Category"])
-result.iloc[:,0]=test1.iloc[:,0]
-
-
-# In[20]:
-
-
-for i in range(len(test1.iloc[:,1])):
-    count1 = 0
-    count2 = 0
-    count3 = 0
-    if test1.iloc[i,1] == 1:
-        count1+=1
-    elif test1.iloc[i,1]==2:
-        count2+=1
-    else:
-        count3+=1
-    if test2.iloc[i,1] == 1:
-        count1+=1
-    elif test2.iloc[i,1]==2:
-        count2+=1
-    else:
-        count3+=1
-    if test3.iloc[i,1] == 1:
-        count1+=1
-    elif test3.iloc[i,1]==2:
-        count2+=1
-    else:
-        count3+=1
-        
-    if count1 > count2 and count1 > count3:
-        result.iloc[i,1]=1
-    elif count2 > count1 and count2 > count3:
-        result.iloc[i,1]=2
-    else:
-        result.iloc[i,1]=3
-
-
-# In[26]:
-
-
-
-result.to_csv("result.csv",index = False)
-
-
-# In[94]:
-
-
-
-
+    result.to_csv(args.out_file, index=False)

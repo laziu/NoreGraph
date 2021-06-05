@@ -7,7 +7,6 @@ from .sampled_softmax import *
 
 
 class UnsupU2GNN(nn.Module):
-
     def __init__(self, vocab_size, feature_dim_size, ff_hidden_size, sampled_num,
                  num_self_att_layers, num_U2GNN_layers, dropout, device):
         super(UnsupU2GNN, self).__init__()
@@ -19,7 +18,6 @@ class UnsupU2GNN(nn.Module):
         self.vocab_size = vocab_size
         self.sampled_num = sampled_num
         self.device = device
-        #
         self.u2gnn_layers = torch.nn.ModuleList()
         for _ in range(self.num_U2GNN_layers):
             encoder_layers = TransformerEncoderLayer(d_model=self.feature_dim_size, nhead=1, dim_feedforward=self.ff_hidden_size, dropout=0.5)  # embed_dim must be divisible by num_heads
@@ -28,14 +26,10 @@ class UnsupU2GNN(nn.Module):
         self.dropouts = nn.Dropout(dropout)
         self.ss = SampledSoftmax(self.vocab_size, self.sampled_num, self.feature_dim_size*self.num_U2GNN_layers, self.device)
 
-    def forward(self, X_concat, input_x, input_y, c_concat):
+    def forward(self, X_concat, input_x, input_y):
         output_vectors = []  # should test output_vectors = [X_concat]
-        input_Tr1 = F.embedding(input_x, X_concat)
-        input_Tr2 = F.embedding(input_x, c_concat)
-        #print('Tr1 shape : {}, Tr2 shape: {}'.format(input_Tr1.shape, input_Tr2.shape))
-        input_Tr = torch.cat((input_Tr1, input_Tr2), dim=2)
+        input_Tr = F.embedding(input_x, X_concat)
         for layer_idx in range(self.num_U2GNN_layers):
-            #
             output_Tr = self.u2gnn_layers[layer_idx](input_Tr)
             output_Tr = torch.split(output_Tr, split_size_or_sections=1, dim=1)[0]
             output_Tr = torch.squeeze(output_Tr, dim=1)
