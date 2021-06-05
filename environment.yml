@@ -3,15 +3,11 @@ channels:
   - pytorch
   - defaults
 dependencies:
-  - python=3.8
-  - pip=21
-  - setuptools=52
-  - cython=0.29
+  - python=3.6
   - pytorch=1.7
+  - tensorflow=1.14
   - cudatoolkit=11
-  - torchvision=0.8.2
-  - numpy=1.20
-  - pillow=8.2
-  - scikit-learn=0.24
-  - scipy=1.6
-  - networkx=2.5
+  - scikit-learn=0.21.2
+  - networkx=2.3
+  - tqdm
+  - pandas
